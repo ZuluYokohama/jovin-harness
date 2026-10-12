@@ -112,3 +112,10 @@ def test_big_ints_round_trip_and_bad_hex_is_rejected(side):
     assert namespace["decode"](json.loads(json.dumps(namespace["encode"](value)))) == value
     with pytest.raises(ValueError):
         namespace["decode"]({"$i": "not-hex"})
+
+
+def test_user_defined_exceptions_arrive_as_their_builtin_base(side):
+    error = side[0]["rebuild"]({"type": "InvalidInput", "builtin": "ValueError", "message": "negative"})
+    assert type(error) is ValueError and str(error) == "InvalidInput: negative"
+    fallback = side[0]["rebuild"]({"type": "Weird", "builtin": "SystemExit", "message": "x"})
+    assert type(fallback) is RuntimeError

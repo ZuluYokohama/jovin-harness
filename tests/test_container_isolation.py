@@ -280,3 +280,25 @@ def test_concurrent_calls_from_test_threads_stay_paired(sandbox):
         assert sorted(results) == [(i, i * i) for i in range(30)]
     """
     assert verify(sandbox, "def square(x):\n    return x * x\n", tests)["status"] == "passed"
+
+
+def test_user_defined_exceptions_can_be_caught_by_their_builtin_base(sandbox):
+    code = """
+        class InvalidInput(ValueError):
+            pass
+
+        def check(n):
+            if n < 0:
+                raise InvalidInput("negative")
+            return n
+    """
+    tests = """
+        def test_negative():
+            try:
+                check(-1)
+            except ValueError as error:
+                assert "InvalidInput" in str(error)
+            else:
+                assert False
+    """
+    assert verify(sandbox, code, tests)["status"] == "passed"

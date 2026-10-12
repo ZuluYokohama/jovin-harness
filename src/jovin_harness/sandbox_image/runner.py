@@ -243,7 +243,10 @@ while True:
     except Unsupported as error:
         reply = {"id": request_id, "unsupported": str(error)[:500]}
     except BaseException as error:
-        reply = {"id": request_id, "raised": {"type": type(error).__name__, "message": str(error)[:2000]}}
+        builtin = next((c.__name__ for c in type(error).__mro__
+                        if c.__module__ == "builtins" and issubclass(c, Exception)), None)
+        reply = {"id": request_id, "raised": {"type": type(error).__name__, "builtin": builtin,
+                                              "message": str(error)[:2000]}}
     try:
         send_frame(responses, reply)
     except Unsupported as error:
@@ -266,7 +269,12 @@ def rebuild(raised):
     message = str(raised.get("message", ""))[:2000]
     kind = getattr(builtins, name, None)
     if not (isinstance(kind, type) and issubclass(kind, Exception)):
-        return RuntimeError(f"{name}: {message}")
+        # A user-defined exception arrives as its nearest builtin base (InvalidInput(ValueError) as a
+        # ValueError), so `except ValueError` in a test still works; the original name stays in the text.
+        kind = getattr(builtins, str(raised.get("builtin"))[:100], None)
+        if not (isinstance(kind, type) and issubclass(kind, Exception)):
+            return RuntimeError(f"{name}: {message}")
+        message = f"{name}: {message}"
     if kind is UnicodeDecodeError:
         return UnicodeDecodeError("unknown", b"", 0, 0, message)
     if kind is UnicodeEncodeError:
