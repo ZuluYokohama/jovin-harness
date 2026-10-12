@@ -104,10 +104,22 @@ def test_surrogates_in_sandbox_output_still_get_a_receipt(tmp_path):
 
 
 def test_shared_isolation_is_labelled_in_the_receipt(tmp_path):
-    harness, _ = make_harness(tmp_path)
+    from fake_docker import passing_result as passing
+    harness, docker = make_harness(tmp_path)
+    docker.result = dict(passing(harness.settings), isolation="shared")
     out = harness.verify_python("x = 1", "assert x == 1", isolation="shared")
     receipt = harness.get_receipt(out["receipt_id"])
     assert out["integrity"] == receipt["integrity"] == "shared_interpreter"
     assert receipt["inputs"]["params"]["isolation"] == "shared"
     with pytest.raises(ToolError):
         harness.verify_python("x = 1", "assert x == 1", isolation="none")
+
+
+def test_integrity_label_comes_from_the_reported_isolation(tmp_path):
+    from fake_docker import passing_result as passing
+    harness, docker = make_harness(tmp_path)
+    failed = dict(passing(harness.settings), status="failed")
+    failed.pop("isolation")
+    docker.result = failed
+    out = harness.verify_python("x = 1", "assert x == 2")
+    assert out["integrity"] == "unverified"

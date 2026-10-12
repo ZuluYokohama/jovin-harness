@@ -24,7 +24,8 @@ def test_create_args_are_the_hardened_profile(settings):
     args = Sandbox(settings).create_args("jovin-harness-x", "x")
     joined = " ".join(args)
     for flag in ("--pull never", "--network none", "--read-only", "--cap-drop ALL", "--cap-add SETUID",
-                 "--cap-add SETGID", "--cap-add KILL", "--security-opt no-new-privileges", "--user 0:0",
+                 "--cap-add SETGID", "--cap-add KILL", "--cap-add CHOWN", "--security-opt no-new-privileges",
+                 "--user 0:0",
                  "--memory 536870912", "--memory-swap 536870912", "--pids-limit 64", "--cpus 1.0",
                  "--ulimit nofile=64:64", "--ulimit core=0:0", "--ulimit fsize=16777216:16777216",
                  "--tmpfs /tmp:rw,noexec,nosuid,nodev,size=16777216", "--log-driver none"):
@@ -41,7 +42,7 @@ def test_matching_container_validates(settings):
     (("HostConfig", "NetworkMode"), "bridge"),
     (("HostConfig", "ReadonlyRootfs"), False),
     (("HostConfig", "Privileged"), True),
-    (("HostConfig", "CapAdd"), ["SETUID", "SETGID", "KILL", "SYS_ADMIN"]),
+    (("HostConfig", "CapAdd"), ["SETUID", "SETGID", "KILL", "CHOWN", "SYS_ADMIN"]),
     (("HostConfig", "SecurityOpt"), ["no-new-privileges", "seccomp=unconfined"]),
     (("HostConfig", "SecurityOpt"), []),
     (("HostConfig", "Memory"), 0),
@@ -236,3 +237,10 @@ def test_payload_carries_isolation_and_mismatch_is_blocked(settings):
     assert json.loads(sent[8:8 + size])["isolation"] == "process"
     assert outcome["result"]["status"] == "blocked"
     assert "isolation" in outcome["result"]["reason"]
+
+
+def test_a_pass_without_a_reported_isolation_is_blocked(settings):
+    result = passing_result(settings)
+    result.pop("isolation")
+    sandbox, _ = make(settings, result=result)
+    assert sandbox.run("verify", "x=1", "assert x == 1")["result"]["status"] == "blocked"

@@ -11,8 +11,8 @@ what it doesn't do, and how to report a problem.
 - **No network** (`--network none`), a **read-only root filesystem**, and a 16 MiB `noexec` tmpfs
   at `/tmp` as the only writable place.
 - **All Linux capabilities dropped.** The in-container supervisor keeps only `SETUID`/`SETGID` (to
-  drop the workers to unprivileged uids) and `KILL` (to stop them at the deadline). The workers have
-  none. Plus `no-new-privileges`, the engine's default seccomp profile, and limits on memory (512 MiB,
+  drop the workers to unprivileged uids), `CHOWN` (to give each worker a private scratch directory)
+  and `KILL` (to stop them at the deadline). The workers have none. Plus `no-new-privileges`, the engine's default seccomp profile, and limits on memory (512 MiB,
   no swap), PIDs (64), CPU (1), open files (64) and file size (16 MiB).
 - **Privilege separation inside the container.** The supervisor (PID 1, root, non-dumpable) never
   runs submitted code. Before sending any code, it checks each worker's uid, gid, capabilities,
@@ -22,7 +22,12 @@ what it doesn't do, and how to report a problem.
   agent's tests as uid 65533, in separate processes. Neither can signal the other or read its memory
   or file descriptors. Tests reach the code only through proxies that exchange plain data over a
   pipe. The codec decodes to built-in types only (no pickle, no custom objects), so returned values
-  can't run code or override comparisons. The test process reports results on a pipe the code
+  can't run code or override comparisons. Exceptions come back as builtin exception types. Harness
+  failures, such as the code exiting mid-call or an unsupported value, are raised as a
+  `BaseException` that a test's `except Exception` can't swallow. Each worker gets a private 0700
+  home and `TMPDIR`, and `/tmp` and `/dev/shm` are made unwritable, so the code can't plant files for
+  the tests. The workers still share the loopback interface and SysV IPC, so tests that deliberately
+  read from those could see data the code left there. The test process reports results on a pipe the code
   process doesn't hold, and the supervisor still judges against its own expected-test list. Receipts
   carry `integrity: "process_isolated"`.
 - **Settings are verified before start.** The host inspects each container after creating it and

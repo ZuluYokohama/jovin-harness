@@ -8,8 +8,8 @@ Verification has two isolation modes:
 - ``process`` (default): the code under test runs as uid 65534 and the tests run as uid 65533, in
   separate processes. Tests call the code's functions through proxies that exchange plain data
   (numbers, strings, lists, dicts, tuples, sets, bytes) over a pipe, so the code can influence the
-  verdict only through the values it returns. The test process reports per-test events on a pipe
-  the code under test cannot reach.
+  verdict only through what its functions return or raise. The test process reports per-test events
+  on a pipe the code under test cannot reach, and each process gets its own private scratch directory.
 - ``shared``: tests and code share one process (uid 65534). Classes and I/O work, but code written
   to cheat can tamper with the tests.
 
@@ -41,7 +41,7 @@ LINGER_S = 1.0  # how long a non-reporting process may outlive the reporting one
 PR_SET_DUMPABLE = 4
 PR_SET_NO_NEW_PRIVS = 38
 ENV = {"PATH": "/usr/local/bin:/usr/bin:/bin", "PYTHONDONTWRITEBYTECODE": "1", "PYTHONHASHSEED": "0",
-       "HOME": "/tmp", "LANG": "C.UTF-8"}
+       "LANG": "C.UTF-8"}
 
 # Shared by every bootstrap: bounded failure descriptions and module loading with source lines.
 COMMON = r'''
@@ -60,7 +60,7 @@ def load(name, filename, source, namespace=None):
     sys.modules[name] = module
     exec(compile(source, filename, "exec"), module.__dict__)
     return module
-os.chdir("/tmp")
+os.chdir(os.environ["HOME"])
 '''
 
 # Runs the agent's tests: emits newline-delimited JSON events on the events fd.
@@ -100,14 +100,17 @@ CODEC = r'''
 import base64, math, struct
 MAX_DEPTH = 64
 MAX_FRAME = 4 * 1024 * 1024
+BIG_INT = 10 ** 4000
 class Unsupported(Exception):
     pass
 def encode(value, depth=0):
     if depth > MAX_DEPTH:
         raise Unsupported("value is nested too deeply")
     kind = type(value)
-    if value is None or kind is bool or kind is str or kind is int:
+    if value is None or kind is bool or kind is str:
         return value
+    if kind is int:
+        return value if -BIG_INT < value < BIG_INT else {"$i": format(value, "x")}
     if kind is float:
         return value if math.isfinite(value) else {"$f": repr(value)}
     if kind is list:
@@ -140,6 +143,8 @@ def decode(value, depth=0):
             return float(body)
         if tag == "$b" and type(body) is str:
             return base64.b64decode(body.encode("ascii"), validate=True)
+        if tag == "$i" and type(body) is str and 0 < len(body) <= MAX_FRAME:
+            return int(body, 16)
         if type(body) is list:
             if tag == "$t":
                 return tuple(decode(item, depth + 1) for item in body)
@@ -153,7 +158,10 @@ def decode(value, depth=0):
 def _reject_constant(name):
     raise ValueError(f"invalid JSON constant {name}")
 def send_frame(fd, message):
-    data = json.dumps(message, allow_nan=False).encode("utf-8")
+    try:
+        data = json.dumps(message, allow_nan=False).encode("utf-8")
+    except ValueError as error:
+        raise Unsupported(f"value cannot be serialized: {error}") from None
     if len(data) > MAX_FRAME:
         raise Unsupported("value is too large to cross the process boundary")
     data = struct.pack(">I", len(data)) + data
@@ -222,6 +230,7 @@ while True:
         request = recv_frame(requests)
     except EOFError:
         break
+    request_id = request.get("id") if type(request) is dict else None
     try:
         function = vars(solution).get(request["call"])
         if request["call"] not in payload["exports"] or not callable(function):
@@ -230,58 +239,103 @@ while True:
         if hasattr(result, "send") and hasattr(result, "throw"):
             result.close()
             raise Unsupported("generators and coroutines cannot cross the process boundary")
-        reply = {"ok": encode(result)}
+        reply = {"id": request_id, "ok": encode(result)}
     except Unsupported as error:
-        reply = {"unsupported": str(error)[:500]}
+        reply = {"id": request_id, "unsupported": str(error)[:500]}
     except BaseException as error:
-        reply = {"raised": {"type": type(error).__name__, "message": str(error)[:2000]}}
+        reply = {"id": request_id, "raised": {"type": type(error).__name__, "message": str(error)[:2000]}}
     try:
         send_frame(responses, reply)
     except Unsupported as error:
-        send_frame(responses, {"unsupported": str(error)[:500]})
+        send_frame(responses, {"id": request_id, "unsupported": str(error)[:500]})
+'''
+
+# Process mode, tests side, call machinery. Kept separate so it can be unit-tested.
+PROXIES = r'''
+import builtins, threading
+class HarnessFailure(BaseException):
+    """A failure of the harness itself (not of the code under test).
+
+    BaseException, so a test's `except Exception` cannot swallow it and pass without the code running.
+    """
+_channel = threading.Lock()
+_state = {"next_id": 0, "broken": None}
+def rebuild(raised):
+    """Turn an exception reported by the code process into a builtin exception (never anything else)."""
+    name = str(raised.get("type"))[:100]
+    message = str(raised.get("message", ""))[:2000]
+    kind = getattr(builtins, name, None)
+    if not (isinstance(kind, type) and issubclass(kind, Exception)):
+        return RuntimeError(f"{name}: {message}")
+    if kind is UnicodeDecodeError:
+        return UnicodeDecodeError("unknown", b"", 0, 0, message)
+    if kind is UnicodeEncodeError:
+        return UnicodeEncodeError("unknown", "", 0, 0, message)
+    if kind is UnicodeTranslateError:
+        return UnicodeTranslateError("", 0, 0, message)
+    for base in kind.__mro__:  # the nearest builtin that can be built from a message alone
+        if isinstance(base, type) and issubclass(base, Exception):
+            try:
+                return base(message)
+            except Exception:
+                continue
+    return RuntimeError(f"{name}: {message}")
+def proxy(name):
+    def call(*args, **kwargs):
+        with _channel:
+            if _state["broken"]:
+                raise HarnessFailure(f"the connection to the code under test is unusable: {_state['broken']}")
+            try:
+                frame = {"call": name, "args": encode(list(args)), "kwargs": encode(kwargs)}
+            except Unsupported as error:
+                raise HarnessFailure(f"argument to {name}(): {error}") from None
+            _state["next_id"] += 1
+            frame["id"] = request_id = _state["next_id"]
+            _state["broken"] = f"a call to {name}() did not complete"  # cleared by its matching reply
+            try:
+                send_frame(requests, frame)
+            except Unsupported as error:
+                _state["broken"] = None  # raised before anything was written
+                raise HarnessFailure(f"argument to {name}(): {error}") from None
+            except BrokenPipeError:
+                raise HarnessFailure(f"the code under test exited before a call to {name}()") from None
+            try:
+                reply = recv_frame(responses)
+            except EOFError:
+                raise HarnessFailure(f"the code under test exited during a call to {name}()") from None
+            except ValueError:
+                raise HarnessFailure(f"the code under test sent a malformed reply to {name}()") from None
+            if type(reply) is not dict or reply.get("id") != request_id:
+                raise HarnessFailure(f"the code under test sent a reply that does not match the call to {name}()")
+            _state["broken"] = None
+        if "ok" in reply:
+            try:
+                return decode(reply["ok"])
+            except (ValueError, TypeError):
+                raise HarnessFailure(f"{name}() returned a malformed value") from None
+        if type(reply.get("raised")) is dict:
+            raise rebuild(reply["raised"])
+        if "unsupported" in reply:
+            raise HarnessFailure(f"{name}() returned {str(reply['unsupported'])[:500]}")
+        raise HarnessFailure(f"the code under test sent an invalid reply to {name}()")
+    call.__name__ = call.__qualname__ = name
+    return call
+def unavailable(name, why):
+    def call(*args, **kwargs):
+        raise HarnessFailure(f"{name} {why}; use isolation='shared' to test it")
+    call.__name__ = name
+    return call
 '''
 
 # Process mode, tests side: proxies forward calls to the code process; events go to the supervisor.
-TESTER = COMMON + CODEC + TEST_LOOP + r'''
-import builtins, keyword
+TESTER = COMMON + CODEC + TEST_LOOP + PROXIES + r'''
+import keyword
 events = os.fdopen(int(sys.argv[1]), "w", encoding="utf-8", buffering=1)
 requests, responses = int(sys.argv[2]), int(sys.argv[3])
 payload = json.loads(os.fdopen(int(sys.argv[4]), "rb").read().decode("utf-8"))
 del sys.argv[1:]
 def emit(**event):
     events.write(json.dumps(event) + "\n")
-def rebuild(raised):
-    kind = getattr(builtins, str(raised.get("type")), None)
-    message = str(raised.get("message", ""))[:2000]
-    if isinstance(kind, type) and issubclass(kind, Exception):
-        return kind(message)
-    return RuntimeError(f"{str(raised.get('type'))[:100]}: {message}")
-def proxy(name):
-    def call(*args, **kwargs):
-        try:
-            send_frame(requests, {"call": name, "args": encode(list(args)), "kwargs": encode(kwargs)})
-        except Unsupported as error:
-            raise TypeError(f"argument to {name}(): {error}") from None
-        except BrokenPipeError:
-            raise RuntimeError(f"the code under test exited before a call to {name}()") from None
-        try:
-            reply = recv_frame(responses)
-        except EOFError:
-            raise RuntimeError(f"the code under test exited during a call to {name}()") from None
-        if type(reply) is dict and "ok" in reply:
-            return decode(reply["ok"])
-        if type(reply) is dict and type(reply.get("raised")) is dict:
-            raise rebuild(reply["raised"])
-        if type(reply) is dict and "unsupported" in reply:
-            raise TypeError(f"{name}() returned {str(reply['unsupported'])[:500]}")
-        raise RuntimeError(f"the code under test sent an invalid reply to {name}()")
-    call.__name__ = call.__qualname__ = name
-    return call
-def unavailable(name, why):
-    def call(*args, **kwargs):
-        raise TypeError(f"{name} {why}; use isolation='shared' to test it")
-    call.__name__ = name
-    return call
 try:
     ready = recv_frame(responses)
 except EOFError:
@@ -295,7 +349,8 @@ emit(event="loaded")
 namespace = {}
 values = ready.get("values")
 for name, value in (values if type(values) is dict else {}).items():
-    if type(name) is str and name.isidentifier() and not keyword.iskeyword(name):
+    if (type(name) is str and name.isidentifier() and not keyword.iskeyword(name)
+            and not name.startswith("__") and not hasattr(builtins, name)):
         try:
             namespace[name] = decode(value)
         except (ValueError, TypeError):
@@ -432,13 +487,35 @@ def drop_to(uid):
     return drop
 
 
-def spawn(script, uid, fds):
+def private_home(uid):
+    """A scratch directory only `uid` can use (needs CAP_CHOWN)."""
+    path = f"/tmp/w{uid}"
+    os.mkdir(path, 0o700)
+    os.chown(path, uid, uid)
+    return path
+
+
+def lock_shared_scratch():
+    """Stop workers from leaving files where another worker might look. Returns what was locked."""
+    locked = []
+    for shared in ("/tmp", "/dev/shm"):
+        try:
+            os.chmod(shared, 0o755)  # noqa: S103 - tightens 1777 so workers keep only their private homes
+            locked.append(shared)
+        except OSError:
+            continue
+    return locked
+
+
+def spawn(script, uid, fds, home):
     """Start a bootstrap as `uid` with exactly `fds` inherited (their numbers are passed as argv)."""
     return subprocess.Popen(
         [sys.executable, "-I", "-c", script, *map(str, fds)],
         stdin=subprocess.PIPE, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
         pass_fds=tuple(fds), close_fds=True, preexec_fn=drop_to(uid), start_new_session=True,
-        cwd="/tmp", env=ENV)
+        # No cwd=: Popen changes directory before dropping privileges, and root without
+        # CAP_DAC_OVERRIDE cannot enter another user's 0700 home. The bootstrap enters HOME itself.
+        env={**ENV, "HOME": home, "TMPDIR": home})
 
 
 def process_status(pid):
@@ -569,11 +646,13 @@ def supervise(reporter, others, events_r, limit, deadline):
 def run_shared(payload, test_names, result, limit, started, deadline):
     events_r, events_w = os.pipe()
     payload_r, payload_w = os.pipe()
-    worker = spawn(WORKER, CODE_UID, (events_w, payload_r))
+    home = private_home(CODE_UID)
+    locked = lock_shared_scratch()
+    worker = spawn(WORKER, CODE_UID, (events_w, payload_r), home)
     os.close(events_w)
     os.close(payload_r)
     ok, observed = isolation_of(worker.pid, CODE_UID)
-    result["kernel"] = {"worker": observed, **cgroup_limits()}
+    result["kernel"] = {"worker": observed, "locked_shared_scratch": locked, **cgroup_limits()}
     if not ok:
         kill_group(worker.pid)
         result.update(status="blocked", reason="worker privilege drop could not be verified")
@@ -598,13 +677,16 @@ def run_isolated(payload, test_names, result, limit, started, deadline):
     responses_r, responses_w = os.pipe()
     code_payload_r, code_payload_w = os.pipe()
     tests_payload_r, tests_payload_w = os.pipe()
-    code = spawn(CANDIDATE, CODE_UID, (requests_r, responses_w, code_payload_r))
-    tests = spawn(TESTER, TESTS_UID, (events_w, requests_w, responses_r, tests_payload_r))
+    code_home, tests_home = private_home(CODE_UID), private_home(TESTS_UID)
+    locked = lock_shared_scratch()
+    code = spawn(CANDIDATE, CODE_UID, (requests_r, responses_w, code_payload_r), code_home)
+    tests = spawn(TESTER, TESTS_UID, (events_w, requests_w, responses_r, tests_payload_r), tests_home)
     for fd in (requests_r, responses_w, code_payload_r, events_w, requests_w, responses_r, tests_payload_r):
         os.close(fd)
     code_ok, code_observed = isolation_of(code.pid, CODE_UID)
     tests_ok, tests_observed = isolation_of(tests.pid, TESTS_UID)
-    result["kernel"] = {"worker": code_observed, "tests_worker": tests_observed, **cgroup_limits()}
+    result["kernel"] = {"worker": code_observed, "tests_worker": tests_observed,
+                        "locked_shared_scratch": locked, **cgroup_limits()}
     if not (code_ok and tests_ok):
         kill_group(code.pid)
         kill_group(tests.pid)

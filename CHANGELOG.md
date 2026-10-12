@@ -7,8 +7,8 @@
   exchange plain data only. Receipts record `integrity: "process_isolated"`.
   `isolation="shared"` keeps the single-process behavior for tests that need classes or objects.
 - The supervisor stops a code process that outlives its tests without calling the run a timeout.
-- The HTTP gate reads a bounded request body before rejecting, so clients reliably see the 401/404
-  instead of a reset connection.
+- The HTTP gate reads up to 1 MiB (for at most 2 s) of a rejected request's body before answering,
+  so ordinary clients see the 401/404 instead of a reset connection.
 
 ## 0.1.0 (unreleased)
 

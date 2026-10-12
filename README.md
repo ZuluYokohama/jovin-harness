@@ -15,7 +15,7 @@ reported.
 - **The code under test can't touch the verdict.** By default the tests and the code run as
   different users in separate processes. Tests call the code's functions through proxies that pass
   plain data (numbers, strings, lists, dicts, tuples, sets, bytes), so the code influences the result
-  only through the values it returns. A supervisor decides pass or fail against its own list of
+  only through what its functions return or raise. A supervisor decides pass or fail against its own list of
   expected tests. Receipts record `integrity: "process_isolated"`. For tests that need the code's
   classes or objects, `isolation="shared"` runs both in one process; such receipts say
   `"shared_interpreter"`. See [SECURITY.md](SECURITY.md).

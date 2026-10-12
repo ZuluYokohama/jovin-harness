@@ -27,7 +27,7 @@ def container_inspect(settings, run_id):
         "Config": {"User": "0:0", "Labels": {RUN_LABEL: run_id}},
         "HostConfig": {
             "NetworkMode": "none", "ReadonlyRootfs": True, "Privileged": False,
-            "CapDrop": ["ALL"], "CapAdd": ["CAP_SETUID", "CAP_SETGID", "CAP_KILL"],
+            "CapDrop": ["ALL"], "CapAdd": ["CAP_SETUID", "CAP_SETGID", "CAP_KILL", "CAP_CHOWN"],
             "SecurityOpt": ["no-new-privileges"],
             "Memory": limits.memory_bytes, "MemorySwap": limits.memory_bytes,
             "PidsLimit": limits.pids, "NanoCpus": int(limits.cpus * 1e9),
@@ -42,7 +42,7 @@ def container_inspect(settings, run_id):
 
 
 def passing_result(settings):
-    return {"format": RESULT_FORMAT, "status": "passed", "mode": "verify", "exit_code": 0,
+    return {"format": RESULT_FORMAT, "status": "passed", "mode": "verify", "isolation": "process", "exit_code": 0,
             "tests": [{"name": "<module>", "outcome": "passed", "message": ""}], "total": 1,
             "passed_count": 1, "stdout_tail": "", "stderr_tail": "", "timed_out": False,
             "kernel": {"memory_max": str(settings.limits.memory_bytes), "pids_max": str(settings.limits.pids),

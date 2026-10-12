@@ -184,3 +184,99 @@ def test_output_of_tests_and_code_is_kept_apart(sandbox):
     assert result["status"] == "passed"
     assert result["stdout_tail"].strip() == "from code"
     assert result["tests_stdout_tail"].strip() == "from tests"
+
+
+def test_huge_integers_cross_the_boundary(sandbox):
+    code = """
+        import math
+        BIG = 10 ** 5000
+
+        def fact(n):
+            return math.factorial(n)
+    """
+    tests = """
+        import math
+        assert BIG == 10 ** 5000
+        assert fact(2000) == math.factorial(2000)
+    """
+    result = verify(sandbox, code, tests)
+    assert result["status"] == "passed", result
+
+
+def test_except_exception_cannot_swallow_harness_failures(sandbox):
+    code = "class Stack:\n    pass\n\ndef gone():\n    import os\n    os._exit(0)\n"
+    tests = """
+        def test_stub():
+            try:
+                Stack()
+            except Exception:
+                return
+
+        def test_exit():
+            try:
+                gone()
+            except Exception:
+                return
+    """
+    result = verify(sandbox, code, tests)
+    assert result["status"] == "failed"
+    assert [t["outcome"] for t in result["tests"][1:]] == ["error", "error"]
+    assert all("HarnessFailure" in t["message"] for t in result["tests"][1:])
+
+
+def test_unicode_errors_cross_as_themselves(sandbox):
+    code = "def bad():\n    return b'\\xff'.decode('utf-8')\n"
+    tests = """
+        def test_decode():
+            try:
+                bad()
+            except UnicodeDecodeError:
+                pass
+            else:
+                assert False
+    """
+    assert verify(sandbox, code, tests)["status"] == "passed"
+
+
+def test_code_cannot_plant_files_for_the_tests(sandbox):
+    code = """
+        import os, tempfile
+        PLANTED = []
+        for path in ("/tmp/planted", "/tmp/w65533/planted", "/dev/shm/planted"):
+            try:
+                with open(path, "w") as handle:
+                    handle.write("x")
+                PLANTED.append(path)
+            except OSError:
+                pass
+        with tempfile.NamedTemporaryFile() as handle:
+            handle.write(b"own scratch space works")
+            OWN_TEMP = handle.name
+
+        def ok():
+            return True
+    """
+    tests = """
+        import os
+        assert PLANTED == []
+        assert OWN_TEMP.startswith("/tmp/w65534/")
+        assert not os.path.exists("/tmp/planted")
+        assert ok()
+    """
+    result = verify(sandbox, code, tests)
+    assert result["status"] == "passed", result
+    assert result["kernel"]["locked_shared_scratch"] == ["/tmp", "/dev/shm"]
+
+
+def test_concurrent_calls_from_test_threads_stay_paired(sandbox):
+    tests = """
+        import threading
+        results = []
+        threads = [threading.Thread(target=lambda i=i: results.append((i, square(i)))) for i in range(30)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+        assert sorted(results) == [(i, i * i) for i in range(30)]
+    """
+    assert verify(sandbox, "def square(x):\n    return x * x\n", tests)["status"] == "passed"
