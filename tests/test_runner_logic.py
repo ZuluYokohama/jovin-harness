@@ -1,0 +1,102 @@
+"""The parts of the in-container supervisor that don't need Linux: test discovery and the verdict."""
+
+import importlib.util
+import json
+from pathlib import Path
+
+import pytest
+
+RUNNER = Path(__file__).parents[1] / "src" / "jovin_harness" / "sandbox_image" / "runner.py"
+spec = importlib.util.spec_from_file_location("sandbox_runner", RUNNER)
+runner = importlib.util.module_from_spec(spec)
+spec.loader.exec_module(runner)
+
+
+def events(*items):
+    return b"".join(json.dumps(item).encode() + b"\n" for item in items)
+
+
+def judge(raw, names, returncode=0):
+    result = {}
+    runner.judge(raw, names, returncode, result)
+    return result
+
+
+NAMES = ["<module>", "test_a", "test_b"]
+GOOD = [{"event": "loaded"}, {"event": "test", "name": "<module>", "outcome": "passed"},
+        {"event": "test", "name": "test_a", "outcome": "passed"},
+        {"event": "test", "name": "test_b", "outcome": "passed"}, {"event": "done"}]
+
+
+def test_expected_tests_in_definition_order():
+    source = "import math\n\ndef test_b():\n    assert 1\n\ndef helper(x):\n    pass\n\ndef test_a(x=1):\n    pass\n"
+    assert runner.expected_tests(source) == ["<module>", "test_b", "test_a"]
+
+
+def test_module_level_asserts_count_as_tests():
+    assert runner.expected_tests("assert 1 + 1 == 2\n") == ["<module>"]
+
+
+@pytest.mark.parametrize("source", [
+    "x = 1\n",
+    "def test_a(x):\n    assert x\n",
+    "async def test_a():\n    assert True\n",
+    "def test_a(*, x):\n    assert x\n",
+])
+def test_unusable_tests_are_rejected(source):
+    with pytest.raises(ValueError):
+        runner.expected_tests(source)
+
+
+def test_all_reported_passes_is_a_pass():
+    result = judge(events(*GOOD), NAMES)
+    assert result["status"] == "passed"
+    assert result["passed_count"] == 3 and result["total"] == 3
+
+
+def test_a_failed_test_fails():
+    items = list(GOOD)
+    items[3] = {"event": "test", "name": "test_b", "outcome": "failed", "message": "AssertionError at line 4"}
+    result = judge(events(*items), NAMES)
+    assert result["status"] == "failed"
+    assert result["tests"][2]["message"] == "AssertionError at line 4"
+
+
+def test_early_exit_is_not_a_pass():
+    assert judge(events(*GOOD[:3]), NAMES)["status"] == "protocol_error"
+
+
+def test_nonzero_exit_is_not_a_pass():
+    assert judge(events(*GOOD), NAMES, returncode=1)["status"] == "protocol_error"
+
+
+def test_duplicate_or_unknown_reports_are_not_a_pass():
+    duplicate = GOOD[:2] + [GOOD[2], GOOD[2]] + GOOD[3:]
+    assert judge(events(*duplicate), NAMES)["status"] == "protocol_error"
+    unknown = GOOD[:4] + [{"event": "test", "name": "test_z", "outcome": "passed"}] + GOOD[4:]
+    assert judge(events(*unknown), NAMES)["status"] == "protocol_error"
+
+
+def test_missing_test_is_not_a_pass():
+    assert judge(events(*(GOOD[:3] + GOOD[4:])), NAMES)["status"] == "protocol_error"
+
+
+def test_garbage_and_late_events_are_not_a_pass():
+    assert judge(events(*GOOD) + b"PASSED\n", NAMES)["status"] == "protocol_error"
+    late = GOOD + [{"event": "test", "name": "test_a", "outcome": "passed"}]
+    assert judge(events(*late), NAMES)["status"] == "protocol_error"
+
+
+def test_never_loaded_is_not_a_pass():
+    assert judge(events(*GOOD[1:]), NAMES)["status"] == "protocol_error"
+
+
+def test_load_error_is_reported():
+    result = judge(events({"event": "load_error", "message": "SyntaxError at line 1"}), NAMES)
+    assert result == {"status": "error", "load_error": "SyntaxError at line 1"}
+
+
+def test_module_failure_fails_without_needing_other_tests():
+    items = [GOOD[0], {"event": "test", "name": "<module>", "outcome": "failed", "message": "boom"},
+             {"event": "done"}]
+    assert judge(events(*items), NAMES)["status"] == "failed"
