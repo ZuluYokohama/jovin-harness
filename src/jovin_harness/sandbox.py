@@ -271,8 +271,12 @@ class Sandbox:
                                               and kernel.get("pids_max") == str(limits.pids))
         finally:
             sandbox["cleanup"] = self._remove(name)
-        if sandbox["cleanup"] != "removed" and result.get("status") in ("passed", "completed"):
-            result = {**result, "status": "blocked", "reason": "the container could not be confirmed removed"}
+        if result.get("status") in ("passed", "completed"):
+            if not sandbox["kernel_verified"]:
+                result = {**result, "status": "blocked",
+                          "reason": "the kernel did not confirm the container's memory and PID limits"}
+            elif sandbox["cleanup"] != "removed":
+                result = {**result, "status": "blocked", "reason": "the container could not be confirmed removed"}
         return {"result": result, "sandbox": sandbox}
 
     def _start(self, name: str, payload: bytes, timeout_s: int) -> dict:

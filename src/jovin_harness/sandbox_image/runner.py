@@ -80,7 +80,10 @@ for name in payload["test_names"]:
         emit(event="test", name=name, outcome="error", message="test function not found after module execution")
         continue
     try:
-        function()
+        returned = function()
+        if hasattr(returned, "send") and hasattr(returned, "throw"):
+            returned.close()
+            raise TypeError("test returned a generator or coroutine, so its body never ran")
     except AssertionError as error:
         emit(event="test", name=name, outcome="failed", message=describe(error, "test_solution.py"))
     except BaseException as error:
@@ -130,12 +133,25 @@ def expected_tests(source):
             required = len(node.args.args) - len(node.args.defaults) + len(node.args.posonlyargs)
             if required or any(d is None for d in node.args.kw_defaults):
                 raise ValueError(f"test {node.name} must not take required arguments")
+            if any(isinstance(n, (ast.Yield, ast.YieldFrom)) for n in _own_body(node)):
+                raise ValueError(f"test {node.name} is a generator; its body would never run")
             if node.name not in seen:
                 seen.add(node.name)
                 names.append(node.name)
     if len(names) == 1 and not module_level_asserts(tree.body):
         raise ValueError("tests contain no assert statements and no test_* functions")
     return names
+
+
+def _own_body(function):
+    """Nodes in a function body, excluding nested functions, classes and lambdas."""
+    stack = list(function.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef, ast.Lambda)):
+            continue
+        yield node
+        stack.extend(ast.iter_child_nodes(node))
 
 
 def kill_group(pid):
@@ -192,13 +208,18 @@ def worker_isolation(pid):
 
 
 def cgroup_limits():
+    """The memory and PID limits the kernel enforces on this container (cgroup v2, else v1)."""
     values = {}
-    for key, name in (("memory_max", "memory.max"), ("pids_max", "pids.max")):
-        try:
-            with open(f"/sys/fs/cgroup/{name}", encoding="utf-8") as handle:
-                values[key] = handle.read().strip()
-        except OSError:
-            values[key] = None
+    for key, paths in (("memory_max", ("memory.max", "memory/memory.limit_in_bytes")),
+                       ("pids_max", ("pids.max", "pids/pids.max"))):
+        values[key] = None
+        for name in paths:
+            try:
+                with open(f"/sys/fs/cgroup/{name}", encoding="utf-8") as handle:
+                    values[key] = handle.read().strip()
+                break
+            except OSError:
+                continue
     return values
 
 

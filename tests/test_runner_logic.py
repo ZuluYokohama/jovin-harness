@@ -115,3 +115,17 @@ def test_asserts_that_never_run_are_not_tests(source):
 def test_module_level_asserts_inside_blocks_count():
     assert runner.expected_tests("for x in range(3):\n    assert x >= 0\n") == ["<module>"]
     assert runner.expected_tests("if True:\n    assert 1\n") == ["<module>"]
+
+
+@pytest.mark.parametrize("source", [
+    "def test_x():\n    yield\n    assert False\n",
+    "def test_x():\n    yield from range(1)\n",
+])
+def test_generator_tests_are_rejected(source):
+    with pytest.raises(ValueError, match="generator"):
+        runner.expected_tests(source)
+
+
+def test_nested_generators_inside_a_test_are_fine():
+    source = "def test_x():\n    def gen():\n        yield 1\n    assert list(gen()) == [1]\n"
+    assert runner.expected_tests(source) == ["<module>", "test_x"]

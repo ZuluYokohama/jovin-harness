@@ -215,3 +215,14 @@ def test_lone_surrogates_in_output_are_replaced(settings):
     assert outcome["result"]["stdout_tail"] == "bad \ufffd text"
     assert outcome["result"]["tests"][0]["message"] == "\ufffd"
     outcome["result"]["stdout_tail"].encode("utf-8")
+
+
+@pytest.mark.parametrize("kernel", [
+    {}, {"memory_max": "max", "pids_max": "64"}, {"memory_max": "536870912", "pids_max": "max"}])
+def test_unconfirmed_kernel_limits_downgrade_a_pass(settings, kernel):
+    result = dict(passing_result(settings), kernel=kernel)
+    sandbox, _ = make(settings, result=result)
+    outcome = sandbox.run("verify", "x=1", "assert x == 1")
+    assert not outcome["sandbox"]["kernel_verified"]
+    assert outcome["result"]["status"] == "blocked"
+    assert "memory and PID limits" in outcome["result"]["reason"]

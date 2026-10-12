@@ -126,3 +126,10 @@ def test_output_flood_is_cut_off(sandbox):
 def test_no_container_is_left_behind(sandbox):
     run(sandbox, "print(1)\n")
     assert sandbox.sweep() == []
+
+
+def test_a_test_returning_a_generator_does_not_pass(sandbox):
+    code = "def make():\n    yield\n    assert False\n"
+    result = verify(sandbox, code, "def test_x():\n    return make()\n")
+    assert result["status"] == "failed"
+    assert "generator" in result["tests"][1]["message"]
