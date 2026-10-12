@@ -1,0 +1,12 @@
+jovin-harness
+Copyright 2026 Zulu Operations
+
+This product is licensed under the Apache License, Version 2.0 (see LICENSE).
+
+jovin-harness is new code. It follows design ideas published in the JoVin research
+workbench (disposable hardened containers, privilege-separated checking and
+hash-bound receipts) but contains no source code from JoVin or Renigma.
+
+The sandbox image is built from the official Python container image, which is
+distributed under its own licenses (Python Software Foundation License and the
+licenses of the Debian packages it contains).
