@@ -77,7 +77,9 @@ def build_server(harness: Harness) -> MCPServer:
         return await _call(harness.run_python, code, stdin, timeout_s)
 
     @server.tool(annotations=_READS, structured_output=True)
-    async def get_receipt(receipt_id: Annotated[str, Field(description="A receipt_id returned by a run.")]) -> dict[str, Any]:
+    async def get_receipt(
+        receipt_id: Annotated[str, Field(description="A receipt_id returned by a run.")],
+    ) -> dict[str, Any]:
         """Return the full stored receipt for a run."""
         return await _call(harness.get_receipt, receipt_id)
 
