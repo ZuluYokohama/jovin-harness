@@ -12,15 +12,18 @@ reported.
   root, no capabilities, and memory, PID, CPU and file limits. The container's settings are inspected
   before it starts. With no container engine, the harness refuses to run rather than fall back to the
   host.
-- **A supervisor outside the code under test decides the verdict.** It judges from a separate
-  channel against its own list of expected tests, so printing fake results or exiting early fails the
-  run. Code written specifically to cheat can still fake a pass, because tests and code share one
-  Python process; receipts say so (`integrity: "shared_interpreter"`). See [SECURITY.md](SECURITY.md).
+- **The code under test can't touch the verdict.** By default the tests and the code run as
+  different users in separate processes. Tests call the code's functions through proxies that pass
+  plain data (numbers, strings, lists, dicts, tuples, sets, bytes), so the code influences the result
+  only through the values it returns. A supervisor decides pass or fail against its own list of
+  expected tests. Receipts record `integrity: "process_isolated"`. For tests that need the code's
+  classes or objects, `isolation="shared"` runs both in one process; such receipts say
+  `"shared_interpreter"`. See [SECURITY.md](SECURITY.md).
 - **Receipts are tamper-evident.** Each receipt hashes its inputs and results and links to the
   previous one, so `verify_receipt` notices edits, deletions and reordering. Failures are receipted
   too.
 
-> Status: early development (0.1.0.dev0). Read [SECURITY.md](SECURITY.md) for what the sandbox does
+> Status: early development (0.2.0.dev0). Read [SECURITY.md](SECURITY.md) for what the sandbox does
 > and doesn't protect against.
 
 ## Quick start
@@ -48,7 +51,8 @@ project's agent instructions.
 You can also run checks by hand:
 
 ```bash
-jovin-harness verify solution.py --tests test_solution.py
+jovin-harness verify solution.py --tests test_solution.py              # process isolation
+jovin-harness verify solution.py --tests test_solution.py --isolation shared
 jovin-harness receipts verify          # check the whole chain
 jovin-harness receipts head            # export this somewhere you trust
 ```
@@ -60,7 +64,7 @@ jovin-harness receipts head            # export this somewhere you trust
   "status": "failed", "passed": false, "total": 2, "passed_count": 1,
   "failures": [{"name": "test_add", "outcome": "failed",
                 "message": "AssertionError at line 4: assert add(2, 3) == 5"}],
-  "integrity": "shared_interpreter",
+  "integrity": "process_isolated",
   "receipt_id": "20261012T221530Z-3f9a1c0b7e2d",
   "receipt_sha256": "…"
 }

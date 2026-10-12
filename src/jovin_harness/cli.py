@@ -48,6 +48,8 @@ def parser() -> argparse.ArgumentParser:
     verify.add_argument("code")
     verify.add_argument("--tests", required=True)
     verify.add_argument("--timeout", type=int)
+    verify.add_argument("--isolation", choices=("process", "shared"), default="process",
+                        help="process: tests and code in separate processes (default); shared: one process")
 
     run = commands.add_parser("run", help="run a Python file in the sandbox")
     run.add_argument("code")
@@ -91,7 +93,7 @@ def main(argv: list[str] | None = None) -> int:
             _print({"image": image, "pinned_in": str(harness.settings.config_file)})
             return 0
         if args.command == "verify":
-            result = harness.verify_python(_read(args.code), _read(args.tests), args.timeout)
+            result = harness.verify_python(_read(args.code), _read(args.tests), args.timeout, args.isolation)
             _print(result)
             return 0 if result["passed"] else 1
         if args.command == "run":

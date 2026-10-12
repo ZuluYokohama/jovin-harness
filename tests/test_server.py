@@ -151,3 +151,14 @@ def test_http_transport_end_to_end(tmp_path):
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+def test_verify_python_schema_offers_isolation(tmp_path):
+    harness, _ = make_harness(tmp_path)
+
+    async def main():
+        async with Client(build_server(harness)) as client:
+            return {tool.name: tool for tool in (await client.list_tools()).tools}
+
+    schema = anyio.run(main)["verify_python"].input_schema["properties"]["isolation"]
+    assert schema["enum"] == ["process", "shared"] and schema["default"] == "process"

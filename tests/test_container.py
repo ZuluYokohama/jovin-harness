@@ -4,24 +4,10 @@ Uses JOVIN_HARNESS_RUNTIME / JOVIN_HARNESS_CONTAINER_ARGV like the server does. 
 image is built once per session into a temporary data directory.
 """
 
-import os
 
 import pytest
 
-from jovin_harness.config import load_settings
-from jovin_harness.sandbox import Sandbox
-
 pytestmark = pytest.mark.container
-
-
-@pytest.fixture(scope="session")
-def sandbox(tmp_path_factory):
-    env = dict(os.environ, JOVIN_HARNESS_DATA_DIR=str(tmp_path_factory.mktemp("harness")))
-    env.pop("JOVIN_HARNESS_IMAGE", None)
-    box = Sandbox(load_settings(env))
-    box.build_image()
-    assert box.status()["ready"], box.status()["problems"]
-    return box
 
 
 def verify(sandbox, code, tests, **kwargs):
@@ -40,6 +26,8 @@ def test_passing_code_passes(sandbox):
     assert [t["name"] for t in result["tests"]] == ["<module>", "test_add"]
     assert meta["inspect_verified"] and meta["kernel_verified"] and meta["cleanup"] == "removed"
     assert set(result["kernel"]["worker"]["uid"]) == {"65534"}
+    assert set(result["kernel"]["tests_worker"]["uid"]) == {"65533"}
+    assert result["isolation"] == "process"
     assert result["kernel"]["worker"]["cap_eff"] == "0000000000000000"
 
 
@@ -95,14 +83,15 @@ def test_printing_a_fake_result_is_not_a_pass(sandbox):
     assert result["status"] != "passed"
 
 
-def test_exiting_early_is_not_a_pass(sandbox):
+def test_exiting_early_is_not_a_pass_in_shared_mode(sandbox):
     result = verify(sandbox, "def f():\n    import os\n    os._exit(0)\n",
-                    "def test_one():\n    f()\n\ndef test_two():\n    assert False\n")
+                    "def test_one():\n    f()\n\ndef test_two():\n    assert False\n", isolation="shared")
     assert result["status"] == "protocol_error"
 
 
-def test_sys_exit_inside_a_test_is_an_error(sandbox):
-    result = verify(sandbox, "import sys\n", "def test_one():\n    sys.exit(0)\n")
+@pytest.mark.parametrize("isolation", ["process", "shared"])
+def test_sys_exit_inside_a_test_is_an_error(sandbox, isolation):
+    result = verify(sandbox, "x = 1\n", "import sys\n\ndef test_one():\n    sys.exit(0)\n", isolation=isolation)
     assert result["status"] == "failed"
     assert result["tests"][1]["outcome"] == "error"
 

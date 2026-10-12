@@ -235,9 +235,12 @@ class Sandbox:
                 raise InputTooLarge(f"{name} is larger than {limit} bytes")
 
     def run(self, mode: str, code: str, tests: str | None = None, stdin: str | None = None,
-            timeout_s: int | None = None) -> dict:
+            timeout_s: int | None = None, isolation: str = "process") -> dict:
         if mode not in ("verify", "run"):
             raise ValueError("mode must be verify or run")
+        if isolation not in ("process", "shared"):
+            raise ValueError("isolation must be process or shared")
+        expected_isolation = isolation if mode == "verify" else "none"
         self.check_inputs(code=code, tests=tests, stdin=stdin)
         limits = self.settings.limits
         timeout_s = min(timeout_s or limits.timeout_s, limits.timeout_s)
@@ -247,7 +250,7 @@ class Sandbox:
                                      "run `jovin-harness image build` again")
         run_id = secrets.token_hex(8)
         name = f"jovin-harness-{run_id}"
-        payload = json.dumps({"mode": mode, "code": code, "tests": tests, "stdin": stdin,
+        payload = json.dumps({"mode": mode, "isolation": isolation, "code": code, "tests": tests, "stdin": stdin,
                               "timeout_s": timeout_s, "max_output_bytes": limits.max_output_bytes}).encode()
         sandbox = {"runtime": self.settings.runtime, "engine": engine, "image": image,
                    "limits": {**limits.as_dict(), "timeout_s": timeout_s}, "run_id": run_id,
@@ -266,6 +269,9 @@ class Sandbox:
             else:
                 sandbox["inspect_verified"] = True
                 result = self._start(name, payload, timeout_s)
+                if result.get("isolation", expected_isolation) != expected_isolation:
+                    result = {**result, "status": "blocked",
+                              "reason": "the sandbox reported a different isolation mode than requested"}
                 kernel = result.get("kernel") or {}
                 sandbox["kernel_verified"] = (kernel.get("memory_max") == str(limits.memory_bytes)
                                               and kernel.get("pids_max") == str(limits.pids))

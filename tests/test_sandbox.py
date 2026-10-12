@@ -226,3 +226,13 @@ def test_unconfirmed_kernel_limits_downgrade_a_pass(settings, kernel):
     assert not outcome["sandbox"]["kernel_verified"]
     assert outcome["result"]["status"] == "blocked"
     assert "memory and PID limits" in outcome["result"]["reason"]
+
+
+def test_payload_carries_isolation_and_mismatch_is_blocked(settings):
+    sandbox, docker = make(settings, result=dict(passing_result(settings), isolation="shared"))
+    outcome = sandbox.run("verify", "x=1", "assert x == 1")  # process isolation requested by default
+    sent = docker.process.stdin.getvalue()
+    (size,) = struct.unpack(">Q", sent[:8])
+    assert json.loads(sent[8:8 + size])["isolation"] == "process"
+    assert outcome["result"]["status"] == "blocked"
+    assert "isolation" in outcome["result"]["reason"]
