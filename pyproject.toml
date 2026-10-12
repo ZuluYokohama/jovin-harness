@@ -1,0 +1,61 @@
+[build-system]
+requires = ["hatchling>=1.27"]
+build-backend = "hatchling.build"
+
+[project]
+name = "jovin-harness"
+dynamic = ["version"]
+description = "An MCP server that lets AI agents check their code in a hardened, disposable container and keeps hash-chained receipts"
+readme = "README.md"
+license = "Apache-2.0"
+license-files = ["LICENSE", "NOTICE"]
+requires-python = ">=3.11"
+authors = [{ name = "Zulu Operations" }]
+keywords = ["mcp", "agents", "sandbox", "code-verification", "llm"]
+classifiers = [
+  "Development Status :: 3 - Alpha",
+  "Intended Audience :: Developers",
+  "Operating System :: OS Independent",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+  "Topic :: Software Development :: Testing",
+]
+dependencies = [
+  "mcp>=2.3,<3",
+  "platformdirs>=4",
+  "uvicorn>=0.31",
+  "starlette>=0.27",
+  "anyio>=4.9",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "ruff>=0.6"]
+
+[project.scripts]
+jovin-harness = "jovin_harness.cli:main"
+
+[tool.hatch.version]
+path = "src/jovin_harness/__init__.py"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/jovin_harness"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-p no:cacheprovider"
+markers = [
+  "container: needs a reachable container runtime and a built sandbox image (run with -m container)",
+]
+
+[tool.ruff]
+line-length = 110
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S"]
+ignore = ["S101", "S603"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S"]
