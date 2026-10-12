@@ -93,6 +93,17 @@ def _tail(data: bytes, limit: int = 500) -> str:
     return data.decode("utf-8", errors="replace").strip()[-limit:]
 
 
+def _clean_text(value):
+    """Replace lone UTF-16 surrogates (valid in JSON escapes, invalid in UTF-8) with U+FFFD."""
+    if isinstance(value, str):
+        return value.encode("utf-16", "surrogatepass").decode("utf-16", "replace")
+    if isinstance(value, list):
+        return [_clean_text(item) for item in value]
+    if isinstance(value, dict):
+        return {_clean_text(key): _clean_text(item) for key, item in value.items()}
+    return value
+
+
 def _caps(values) -> set[str]:
     return {str(v).upper().removeprefix("CAP_") for v in (values or [])}
 
@@ -162,7 +173,7 @@ class Sandbox:
         return [
             "create", "--pull", "never", "--name", name, "--label", f"{RUN_LABEL}={run_id}",
             "--interactive", "--network", "none", "--read-only",
-            "--cap-drop", "ALL", "--cap-add", "SETUID", "--cap-add", "SETGID",
+            "--cap-drop", "ALL", "--cap-add", "SETUID", "--cap-add", "SETGID", "--cap-add", "KILL",
             "--security-opt", "no-new-privileges", "--user", "0:0",
             "--memory", str(limits.memory_bytes), "--memory-swap", str(limits.memory_bytes),
             "--pids-limit", str(limits.pids), "--cpus", str(limits.cpus),
@@ -190,7 +201,7 @@ class Sandbox:
         expect("read-only root", host.get("ReadonlyRootfs"), True)
         expect("privileged", host.get("Privileged"), False)
         expect("dropped capabilities", _caps(host.get("CapDrop")), {"ALL"})
-        expect("added capabilities", _caps(host.get("CapAdd")), {"SETUID", "SETGID"})
+        expect("added capabilities", _caps(host.get("CapAdd")), {"SETUID", "SETGID", "KILL"})
         expect("memory", host.get("Memory"), limits.memory_bytes)
         expect("memory+swap", host.get("MemorySwap"), limits.memory_bytes)
         expect("pids limit", host.get("PidsLimit"), limits.pids)
@@ -330,7 +341,7 @@ class Sandbox:
             return None
         if not isinstance(result, dict) or result.get("format") != RESULT_FORMAT:
             return None
-        return result
+        return _clean_text(result)
 
     def _remove(self, name: str) -> str:
         """Force-remove the container; report "removed" only when the engine says it no longer exists."""

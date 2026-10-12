@@ -232,6 +232,9 @@ class ReceiptStore:
                 recorded = entry.get("sha256")
                 if receipt_hash(receipt) != recorded or receipt.get("sha256") != recorded:
                     problems.append(f"{label}: receipt file does not match its index entry")
+                # The link inside the hashed receipt is authoritative; the index alone can be rewritten.
+                if receipt.get("id") != entry.get("id") or receipt.get("prev_sha256") != previous:
+                    problems.append(f"{label}: receipt's own chain link does not match the previous receipt")
             previous = entry.get("sha256")
         on_disk = {p.stem for p in self.directory.glob("*.json")} if self.directory.is_dir() else set()
         for stray in sorted(on_disk - {e.get("id") for e in entries}):

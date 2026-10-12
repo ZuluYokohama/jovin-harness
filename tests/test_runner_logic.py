@@ -100,3 +100,18 @@ def test_module_failure_fails_without_needing_other_tests():
     items = [GOOD[0], {"event": "test", "name": "<module>", "outcome": "failed", "message": "boom"},
              {"event": "done"}]
     assert judge(events(*items), NAMES)["status"] == "failed"
+
+
+@pytest.mark.parametrize("source", [
+    "def check():\n    assert False\n",
+    "class TestThing:\n    def test_x(self):\n        assert False\n",
+    "f = lambda: None\nassert_ok = True\n",
+])
+def test_asserts_that_never_run_are_not_tests(source):
+    with pytest.raises(ValueError):
+        runner.expected_tests(source)
+
+
+def test_module_level_asserts_inside_blocks_count():
+    assert runner.expected_tests("for x in range(3):\n    assert x >= 0\n") == ["<module>"]
+    assert runner.expected_tests("if True:\n    assert 1\n") == ["<module>"]

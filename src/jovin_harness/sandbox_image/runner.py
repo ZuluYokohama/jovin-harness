@@ -122,6 +122,8 @@ def expected_tests(source):
     tree = ast.parse(source, "test_solution.py")
     names, seen = ["<module>"], set()
     for node in tree.body:
+        if isinstance(node, ast.ClassDef) and node.name.startswith("Test"):
+            raise ValueError(f"test classes such as {node.name} are not supported; use top-level test_* functions")
         if isinstance(node, ast.AsyncFunctionDef) and node.name.startswith("test_"):
             raise ValueError(f"async test {node.name} is not supported")
         if isinstance(node, ast.FunctionDef) and node.name.startswith("test_"):
@@ -131,10 +133,30 @@ def expected_tests(source):
             if node.name not in seen:
                 seen.add(node.name)
                 names.append(node.name)
-    has_assert = any(isinstance(n, ast.Assert) for n in ast.walk(tree))
-    if len(names) == 1 and not has_assert:
+    if len(names) == 1 and not module_level_asserts(tree.body):
         raise ValueError("tests contain no assert statements and no test_* functions")
     return names
+
+
+def kill_group(pid):
+    """SIGKILL the worker's process group (needs CAP_KILL: the worker runs under another uid)."""
+    try:
+        os.killpg(pid, signal.SIGKILL)
+    except ProcessLookupError:
+        pass
+
+
+def module_level_asserts(statements):
+    """Asserts that run when the test module executes: not inside functions, classes or lambdas."""
+    for node in statements:
+        if isinstance(node, ast.Assert):
+            return True
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            continue
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, ast.stmt) and module_level_asserts([child]):
+                return True
+    return False
 
 
 def libc():
@@ -223,7 +245,7 @@ def run_worker(payload, test_names, result):
     ok, observed = worker_isolation(worker.pid)
     result["kernel"] = {"worker": observed, **cgroup_limits()}
     if not ok:
-        os.killpg(worker.pid, signal.SIGKILL)
+        kill_group(worker.pid)
         result.update(status="blocked", reason="worker privilege drop could not be verified")
         return
     job = dict(code=payload["code"], mode=payload["mode"], tests=payload.get("tests"), test_names=test_names)
@@ -261,17 +283,14 @@ def run_worker(payload, test_names, result):
         if stop:
             break
     if stop:
-        os.killpg(worker.pid, signal.SIGKILL)
+        kill_group(worker.pid)
     try:
         returncode = worker.wait(timeout=max(0.1, deadline + 1 - time.monotonic()))
     except subprocess.TimeoutExpired:
-        os.killpg(worker.pid, signal.SIGKILL)
+        kill_group(worker.pid)
         returncode = worker.wait()
         stop = stop or "timeout"
-    try:  # stray descendants of the worker
-        os.killpg(worker.pid, signal.SIGKILL)
-    except ProcessLookupError:
-        pass
+    kill_group(worker.pid)  # stray descendants of the worker
     result.update(
         duration_s=round(time.monotonic() - started, 4),
         exit_code=returncode,

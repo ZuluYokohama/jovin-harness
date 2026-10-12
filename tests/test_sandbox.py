@@ -24,7 +24,7 @@ def test_create_args_are_the_hardened_profile(settings):
     args = Sandbox(settings).create_args("jovin-harness-x", "x")
     joined = " ".join(args)
     for flag in ("--pull never", "--network none", "--read-only", "--cap-drop ALL", "--cap-add SETUID",
-                 "--cap-add SETGID", "--security-opt no-new-privileges", "--user 0:0",
+                 "--cap-add SETGID", "--cap-add KILL", "--security-opt no-new-privileges", "--user 0:0",
                  "--memory 536870912", "--memory-swap 536870912", "--pids-limit 64", "--cpus 1.0",
                  "--ulimit nofile=64:64", "--ulimit core=0:0", "--ulimit fsize=16777216:16777216",
                  "--tmpfs /tmp:rw,noexec,nosuid,nodev,size=16777216", "--log-driver none"):
@@ -41,7 +41,7 @@ def test_matching_container_validates(settings):
     (("HostConfig", "NetworkMode"), "bridge"),
     (("HostConfig", "ReadonlyRootfs"), False),
     (("HostConfig", "Privileged"), True),
-    (("HostConfig", "CapAdd"), ["SETUID", "SETGID", "SYS_ADMIN"]),
+    (("HostConfig", "CapAdd"), ["SETUID", "SETGID", "KILL", "SYS_ADMIN"]),
     (("HostConfig", "SecurityOpt"), ["no-new-privileges", "seccomp=unconfined"]),
     (("HostConfig", "SecurityOpt"), []),
     (("HostConfig", "Memory"), 0),
@@ -204,3 +204,14 @@ def test_cleanup_is_unconfirmed_when_inspect_fails_for_another_reason(settings):
     outcome = sandbox.run("verify", "x=1", "assert x == 1")
     assert outcome["sandbox"]["cleanup"] == "unconfirmed"
     assert outcome["result"]["status"] == "blocked"
+
+
+def test_lone_surrogates_in_output_are_replaced(settings):
+    result = passing_result(settings)
+    result["stdout_tail"] = "bad \ud800 text"
+    result["tests"][0]["message"] = "\udfff"
+    sandbox, _ = make(settings, result=result)
+    outcome = sandbox.run("verify", "x=1", "assert x == 1")
+    assert outcome["result"]["stdout_tail"] == "bad \ufffd text"
+    assert outcome["result"]["tests"][0]["message"] == "\ufffd"
+    outcome["result"]["stdout_tail"].encode("utf-8")

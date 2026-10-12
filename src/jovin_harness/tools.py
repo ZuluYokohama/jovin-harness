@@ -96,7 +96,7 @@ class Harness:
                 "sandbox": sandbox,
                 "result": result,
             })
-        except (ReceiptError, OSError) as error:
+        except (ReceiptError, OSError, ValueError) as error:
             # The code ran, but an unreceipted result must not be reported as if it were recorded.
             raise ToolError(f"the run finished (status {result.get('status')!r}) but its receipt could not be "
                             f"written: {error}") from error

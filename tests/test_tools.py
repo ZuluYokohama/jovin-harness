@@ -93,3 +93,11 @@ def test_corrupt_receipt_store_is_a_tool_error(tmp_path):
         harness.run_python("print(1)")
     status = harness.sandbox_status()
     assert not status["ready"] and any("receipt store" in p for p in status["problems"])
+
+
+def test_surrogates_in_sandbox_output_still_get_a_receipt(tmp_path):
+    from fake_docker import passing_result as passing
+    harness, docker = make_harness(tmp_path)
+    docker.result = dict(passing(harness.settings), stderr_tail="\ud800")
+    out = harness.verify_python("x = 1", "assert x == 1")
+    assert out["receipt_id"] and harness.verify_receipt(receipt_id=out["receipt_id"])["valid"]

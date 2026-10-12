@@ -152,3 +152,18 @@ def test_corrupt_receipt_file_is_a_receipt_error(tmp_path):
     store.path_for(receipt["id"]).write_text("{not json", encoding="utf-8")
     with pytest.raises(ReceiptError, match="not valid JSON"):
         store.get(receipt["id"])
+
+
+def test_rewritten_middle_receipt_with_patched_index_is_detected(tmp_path):
+    store = ReceiptStore(tmp_path)
+    first, middle, last = (store.append(body(n)) for n in (1, 2, 3))
+    forged = dict(middle, result={"exit_code": 0})
+    forged["sha256"] = receipt_hash(forged)
+    store.path_for(middle["id"]).write_bytes(canonical_json(forged))
+    lines = [json.loads(line) for line in store.index.read_text(encoding="utf-8").splitlines()]
+    lines[1]["sha256"] = forged["sha256"]
+    lines[2]["prev_sha256"] = forged["sha256"]
+    store.index.write_text("".join(canonical_json(e).decode() + "\n" for e in lines), encoding="utf-8")
+    chain = store.verify_chain()
+    assert not chain["valid"]
+    assert any(last["id"] in p and "own chain link" in p for p in chain["problems"])

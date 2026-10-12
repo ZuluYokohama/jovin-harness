@@ -27,7 +27,7 @@ def container_inspect(settings, run_id):
         "Config": {"User": "0:0", "Labels": {RUN_LABEL: run_id}},
         "HostConfig": {
             "NetworkMode": "none", "ReadonlyRootfs": True, "Privileged": False,
-            "CapDrop": ["ALL"], "CapAdd": ["CAP_SETUID", "CAP_SETGID"],
+            "CapDrop": ["ALL"], "CapAdd": ["CAP_SETUID", "CAP_SETGID", "CAP_KILL"],
             "SecurityOpt": ["no-new-privileges"],
             "Memory": limits.memory_bytes, "MemorySwap": limits.memory_bytes,
             "PidsLimit": limits.pids, "NanoCpus": int(limits.cpus * 1e9),

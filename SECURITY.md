@@ -10,8 +10,8 @@ what it doesn't do, and how to report a problem.
   `jovin-harness doctor --sweep`.
 - **No network** (`--network none`), a **read-only root filesystem**, and a 16 MiB `noexec` tmpfs
   at `/tmp` as the only writable place.
-- **All Linux capabilities dropped.** The in-container supervisor keeps only `SETUID`/`SETGID`, and
-  only to drop the worker. Plus `no-new-privileges`, the engine's default seccomp profile, and limits
+- **All Linux capabilities dropped.** The in-container supervisor keeps only `SETUID`/`SETGID` (to
+  drop the worker to uid 65534) and `KILL` (to stop it at the deadline). The worker has none. Plus `no-new-privileges`, the engine's default seccomp profile, and limits
   on memory (512 MiB, no swap), PIDs (64), CPU (1), open files (64) and file size (16 MiB).
 - **Privilege separation inside the container.** The supervisor (PID 1, root, non-dumpable) never
   runs submitted code. A worker does, as uid/gid 65534 with no capabilities. The supervisor checks
