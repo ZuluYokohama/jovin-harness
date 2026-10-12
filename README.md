@@ -12,8 +12,10 @@ reported.
   root, no capabilities, and memory, PID, CPU and file limits. The container's settings are inspected
   before it starts. With no container engine, the harness refuses to run rather than fall back to the
   host.
-- **The verdict comes from outside the code under test.** A supervisor process decides pass or fail
-  from a separate channel, so printing fake results or exiting early doesn't count as a pass.
+- **A supervisor outside the code under test decides the verdict.** It judges from a separate
+  channel against its own list of expected tests, so printing fake results or exiting early fails the
+  run. Code written specifically to cheat can still fake a pass, because tests and code share one
+  Python process; receipts say so (`integrity: "shared_interpreter"`). See [SECURITY.md](SECURITY.md).
 - **Receipts are tamper-evident.** Each receipt hashes its inputs and results and links to the
   previous one, so `verify_receipt` notices edits, deletions and reordering. Failures are receipted
   too.

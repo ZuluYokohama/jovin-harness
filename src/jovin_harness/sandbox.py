@@ -333,12 +333,15 @@ class Sandbox:
         return result
 
     def _remove(self, name: str) -> str:
+        """Force-remove the container; report "removed" only when the engine says it no longer exists."""
         try:
             self.executor.run(self.cli("rm", "--force", name), timeout=60)
             gone = self.executor.run(self.cli("container", "inspect", name), timeout=60)
         except SandboxUnavailable:
             return "unconfirmed"
-        return "removed" if gone.returncode != 0 else "unconfirmed"
+        # Any other inspect failure (daemon unreachable, permissions) proves nothing about removal.
+        missing = gone.returncode != 0 and b"no such" in gone.stderr.lower()
+        return "removed" if missing else "unconfirmed"
 
     # -- maintenance -------------------------------------------------------------------------
 

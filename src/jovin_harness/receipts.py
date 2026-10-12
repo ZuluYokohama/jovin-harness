@@ -123,7 +123,7 @@ class ReceiptStore:
         if reserved:
             raise ReceiptError(f"body may not set {sorted(reserved)}")
         with _exclusive(self.lock):
-            entries = self._entries()
+            entries = self._recover_tail(self._entries())
             now = datetime.now(UTC)
             receipt = {
                 "format": FORMAT,
@@ -134,26 +134,60 @@ class ReceiptStore:
                 "prev_sha256": entries[-1]["sha256"] if entries else None,
             }
             receipt["sha256"] = receipt_hash(receipt)
-            data = canonical_json(receipt)
             path = self.path_for(receipt["id"])
-            # O_EXCL: a receipt file is written once and never replaced.
-            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
+            if path.exists():
+                raise ReceiptError(f"receipt {receipt['id']} already exists")
+            # Write under a name the store ignores, then rename: a crash never leaves a partial
+            # receipt. A crash between the rename and the index line leaves a complete receipt that
+            # chains onto the head; the next append indexes it (see _recover_tail).
+            partial = path.with_name(path.name + ".partial")
+            fd = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_BINARY", 0), 0o644)
             with os.fdopen(fd, "wb") as handle:
-                handle.write(data)
+                handle.write(canonical_json(receipt))
                 handle.flush()
                 os.fsync(handle.fileno())
-            entry = {"id": receipt["id"], "sha256": receipt["sha256"], "prev_sha256": receipt["prev_sha256"]}
-            with self.index.open("ab") as handle:
-                handle.write(canonical_json(entry) + b"\n")
-                handle.flush()
-                os.fsync(handle.fileno())
+            os.replace(partial, path)
+            self._append_index(receipt)
             return receipt
+
+    def _append_index(self, receipt: dict) -> None:
+        entry = {"id": receipt["id"], "sha256": receipt["sha256"], "prev_sha256": receipt["prev_sha256"]}
+        with self.index.open("ab") as handle:
+            handle.write(canonical_json(entry) + b"\n")
+            handle.flush()
+            os.fsync(handle.fileno())
+
+    def _recover_tail(self, entries: list[dict]) -> list[dict]:
+        """Index a receipt whose index line was lost to a crash, if it chains exactly onto the head.
+
+        Only a complete, self-consistent receipt linked to the current head qualifies. Anything else
+        stays an unindexed stray that verify_chain reports.
+        """
+        if not self.directory.is_dir():
+            return entries
+        known = {entry.get("id") for entry in entries}
+        head = entries[-1]["sha256"] if entries else None
+        for path in sorted(self.directory.glob("*.json")):
+            if path.stem in known or not RECEIPT_ID.match(path.stem):
+                continue
+            try:
+                receipt = json.loads(path.read_text(encoding="utf-8"))
+            except (OSError, json.JSONDecodeError):
+                continue
+            if (isinstance(receipt, dict) and receipt.get("id") == path.stem and receipt.get("prev_sha256") == head
+                    and receipt.get("sha256") == receipt_hash(receipt)):
+                self._append_index(receipt)
+                return [*entries, {"id": receipt["id"], "sha256": receipt["sha256"], "prev_sha256": head}]
+        return entries
 
     def get(self, receipt_id: str) -> dict:
         path = self.path_for(receipt_id)
         if not path.is_file():
             raise ReceiptError(f"no receipt {receipt_id}")
-        return json.loads(path.read_text(encoding="utf-8"))
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except json.JSONDecodeError as error:
+            raise ReceiptError(f"receipt {receipt_id} is not valid JSON") from error
 
     def verify(self, receipt: dict) -> dict:
         """Check one receipt's own hash and, if it is in this store, its place in the chain."""

@@ -188,3 +188,19 @@ def test_sweep_removes_labelled_leftovers(settings):
     sandbox, docker = make(settings)
     assert sandbox.sweep() == ["aaa", "bbb"]
     assert ["rm", "--force", "aaa"] in docker.calls
+
+
+def test_cleanup_is_unconfirmed_when_inspect_fails_for_another_reason(settings):
+    sandbox, docker = make(settings, result=passing_result(settings))
+    original = docker.run
+
+    def run(argv, **kwargs):
+        args = argv[len(settings.container_command):]
+        if args[:2] == ["container", "inspect"] and len(args) == 3 and args[2] in docker.removed:
+            return fail(b"Cannot connect to the Docker daemon")
+        return original(argv, **kwargs)
+
+    docker.run = run
+    outcome = sandbox.run("verify", "x=1", "assert x == 1")
+    assert outcome["sandbox"]["cleanup"] == "unconfirmed"
+    assert outcome["result"]["status"] == "blocked"

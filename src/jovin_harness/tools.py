@@ -87,14 +87,19 @@ class Harness:
             inputs["tests_sha256"] = sha256_hex(tests)
         if stdin is not None:
             inputs["stdin_sha256"] = sha256_hex(stdin)
-        receipt = self.store.append({
-            "harness_version": __version__,
-            "tool": tool,
-            "integrity": INTEGRITY[mode],
-            "inputs": inputs,
-            "sandbox": sandbox,
-            "result": result,
-        })
+        try:
+            receipt = self.store.append({
+                "harness_version": __version__,
+                "tool": tool,
+                "integrity": INTEGRITY[mode],
+                "inputs": inputs,
+                "sandbox": sandbox,
+                "result": result,
+            })
+        except (ReceiptError, OSError) as error:
+            # The code ran, but an unreceipted result must not be reported as if it were recorded.
+            raise ToolError(f"the run finished (status {result.get('status')!r}) but its receipt could not be "
+                            f"written: {error}") from error
         return {"result": result, "receipt": receipt}
 
     def verify_python(self, code: str, tests: str, timeout_s: int | None = None) -> dict:
@@ -142,7 +147,7 @@ class Harness:
     def get_receipt(self, receipt_id: str) -> dict:
         try:
             return self.store.get(receipt_id)
-        except ReceiptError as error:
+        except (ReceiptError, OSError) as error:
             raise ToolError(str(error)) from error
 
     def verify_receipt(self, receipt_id: str | None = None, receipt: dict | None = None) -> dict:
@@ -152,14 +157,24 @@ class Harness:
             receipt = self.get_receipt(receipt_id)
         if not isinstance(receipt, dict):
             raise ToolError("receipt must be a JSON object")
-        verdict = self.store.verify(receipt)
-        if verdict["chain"] == "linked":
-            stored = self.store.get(receipt["id"])
-            if stored != receipt:
-                verdict["valid"] = False
-                verdict["problems"].append("receipt differs from the stored copy")
-        return {**verdict, "head": self.store.head()}
+        try:
+            verdict = self.store.verify(receipt)
+            if verdict["chain"] == "linked":
+                stored = self.store.get(receipt["id"])
+                if stored != receipt:
+                    verdict["valid"] = False
+                    verdict["problems"].append("receipt differs from the stored copy")
+            return {**verdict, "head": self.store.head()}
+        except (ReceiptError, OSError) as error:
+            raise ToolError(f"the receipt store could not be read: {error}") from error
 
     def sandbox_status(self) -> dict:
-        return {**self.sandbox.status(), "receipts": self.store.head(), "harness_version": __version__,
+        status = self.sandbox.status()
+        try:
+            receipts = self.store.head()
+        except (ReceiptError, OSError) as error:
+            receipts = None
+            status["problems"].append(f"receipt store unreadable: {error}")
+            status["ready"] = False
+        return {**status, "receipts": receipts, "harness_version": __version__,
                 "max_concurrency": self.settings.max_concurrency}

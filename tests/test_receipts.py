@@ -112,3 +112,43 @@ def test_concurrent_appends_keep_a_single_chain(tmp_path):
     chain = store.verify_chain()
     assert chain["valid"], chain["problems"]
     assert chain["count"] == 16
+
+
+def test_crash_before_indexing_is_repaired_by_the_next_append(tmp_path, monkeypatch):
+    store = ReceiptStore(tmp_path)
+    first = store.append(body(1))
+    original = ReceiptStore._append_index
+
+    def crash(self, receipt):
+        raise OSError("disk full")
+
+    monkeypatch.setattr(ReceiptStore, "_append_index", crash)
+    with pytest.raises(OSError):
+        store.append(body(2))
+    assert not store.verify_chain()["valid"]  # the orphaned receipt is reported until repaired
+    assert not list(tmp_path.glob("*.partial"))
+    monkeypatch.setattr(ReceiptStore, "_append_index", original)
+    third = store.append(body(3))
+    chain = store.verify_chain()
+    assert chain["valid"], chain["problems"]
+    assert chain["count"] == 3
+    assert store.get(third["id"])["prev_sha256"] != first["sha256"]
+
+
+def test_unrelated_stray_is_not_adopted(tmp_path):
+    store = ReceiptStore(tmp_path)
+    store.append(body(1))
+    stray = dict(store.get(store.head()["head_id"]), id="20260101T000000Z-aaaaaaaaaaaa", prev_sha256="0" * 64)
+    stray["sha256"] = receipt_hash(stray)
+    store.path_for(stray["id"]).write_bytes(canonical_json(stray))
+    store.append(body(2))
+    problems = store.verify_chain()["problems"]
+    assert any("not in the index" in p for p in problems)
+
+
+def test_corrupt_receipt_file_is_a_receipt_error(tmp_path):
+    store = ReceiptStore(tmp_path)
+    receipt = store.append(body(1))
+    store.path_for(receipt["id"]).write_text("{not json", encoding="utf-8")
+    with pytest.raises(ReceiptError, match="not valid JSON"):
+        store.get(receipt["id"])

@@ -81,3 +81,15 @@ def test_status_includes_receipt_head(tmp_path):
     harness, _ = make_harness(tmp_path)
     status = harness.sandbox_status()
     assert status["ready"] and status["receipts"]["count"] == 0
+
+
+def test_corrupt_receipt_store_is_a_tool_error(tmp_path):
+    harness, _ = make_harness(tmp_path)
+    out = harness.verify_python("x = 1", "assert x == 1")
+    harness.store.index.write_text("{broken\n", encoding="utf-8")
+    with pytest.raises(ToolError, match="could not be read"):
+        harness.verify_receipt(receipt_id=out["receipt_id"])
+    with pytest.raises(ToolError, match="receipt could not be written"):
+        harness.run_python("print(1)")
+    status = harness.sandbox_status()
+    assert not status["ready"] and any("receipt store" in p for p in status["problems"])
