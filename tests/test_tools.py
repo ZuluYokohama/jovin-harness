@@ -123,3 +123,39 @@ def test_integrity_label_comes_from_the_reported_isolation(tmp_path):
     docker.result = failed
     out = harness.verify_python("x = 1", "assert x == 2")
     assert out["integrity"] == "unverified"
+
+@pytest.mark.parametrize("bad_index", ["null\n", "[]\n", "{}\n", '{"id": []}\n'])
+def test_malformed_receipt_index_is_a_clear_tool_error(tmp_path, bad_index):
+    harness, _ = make_harness(tmp_path)
+    out = harness.verify_python("x=1", "assert x == 1")
+    harness.store.index.write_text(bad_index, encoding="utf-8")
+    with pytest.raises(ToolError, match="could not be read"):
+        harness.verify_receipt(receipt_id=out["receipt_id"])
+    assert not harness.sandbox_status()["ready"]
+
+
+@pytest.mark.parametrize("raw", ["null", "[]", "{}"])
+def test_malformed_receipt_file_is_a_clear_tool_error(tmp_path, raw):
+    harness, _ = make_harness(tmp_path)
+    out = harness.verify_python("x=1", "assert x == 1")
+    harness.store.path_for(out["receipt_id"]).write_text(raw, encoding="utf-8")
+    with pytest.raises(ToolError):
+        harness.get_receipt(out["receipt_id"])
+    with pytest.raises(ToolError, match="could not be read"):
+        harness.verify_receipt(receipt_id=out["receipt_id"])
+
+
+def test_verify_receipt_uses_one_consistent_index_snapshot(tmp_path, monkeypatch):
+    harness, _ = make_harness(tmp_path)
+    out = harness.verify_python("x=1", "assert x == 1")
+    reads = []
+    original = harness.store._entries
+
+    def count_reads():
+        reads.append(1)
+        return original()
+
+    monkeypatch.setattr(harness.store, "_entries", count_reads)
+    result = harness.verify_receipt(receipt_id=out["receipt_id"])
+    assert result["valid"] and result["head"]["head_sha256"] == out["receipt_sha256"]
+    assert reads == [1]

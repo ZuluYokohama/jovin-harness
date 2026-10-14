@@ -6,8 +6,10 @@ what it doesn't do, and how to report a problem.
 
 ## What every run gets
 
-- A **fresh container** per call, removed afterwards. Leftovers from crashes are swept by
-  `jovin-harness doctor --sweep`.
+- A **fresh container** per call, removed afterwards. `jovin-harness doctor --sweep` removes only
+  confirmed stopped harness containers with matching ownership and image evidence. Running, created
+  and ambiguously owned containers are skipped. Removal is reported only after confirming absence;
+  unresolved cleanup produces a nonzero command status.
 - **No network** (`--network none`), a **read-only root filesystem**, and a 16 MiB `noexec` tmpfs
   at `/tmp` as the only writable place.
 - **All Linux capabilities dropped.** The in-container supervisor keeps only `SETUID`/`SETGID` (to
@@ -34,7 +36,9 @@ what it doesn't do, and how to report a problem.
   refuses to start it unless the image ID, network, mounts, capabilities, security options, limits,
   tmpfs, ulimits and log driver match the profile.
 - **Deadlines on both sides.** The supervisor's own alarm ends PID 1 even if the host side
-  disappears, and the host kills the container at its own deadline.
+  disappears, and the host kills the container at its own deadline. A host timeout, OOM, abnormal
+  supervisor exit or unconfirmed terminal state cannot be overridden by a passing runner payload.
+  Overridden payloads remain diagnostic data in failure receipts.
 - **Bounded input and output.** Code, tests and stdin are capped at 256 KiB each. Output tails are
   capped at 64 KiB, and a flood stops the run.
 - **Fail closed.** With no reachable engine, no pinned image, an engine without seccomp, or an image
@@ -54,7 +58,11 @@ what it doesn't do, and how to report a problem.
   evidence, and `tests_sha256` in the receipt shows exactly which tests ran. The tests themselves are
   agent-written and run unprivileged; they're judged, not trusted.
 - **Receipts are tamper-evident, not signed.** Each receipt hashes its contents and the previous
-  receipt, so edits, deletions and reordering are detected. Someone with write access to the data
+  receipt. Whole-store verification detects edits, missing files and reordering; individual
+  verification checks the selected receipt and its recorded index link. Readers and writers share
+  a cross-process lock. Interrupted final index writes are recovered only from one unambiguous,
+  hash-valid matching receipt, retaining the damaged bytes; ambiguous corruption is refused.
+  Someone with write access to the data
   directory could rebuild a consistent chain, though. Export the chain head
   (`jovin-harness receipts head`) somewhere you control if that matters.
 - **Output is untrusted.** `stdout_tail`, `stderr_tail` and failure messages come from the code under
