@@ -91,8 +91,8 @@ The real tests exercise memory/PID/output/time limits, network/filesystem
 restrictions, worker user/process separation, malformed replies and complete
 container removal. Unit-test skips are not used as container acceptance.
 Two bounded source reviews found no remaining blockers; they do not represent
-external security certification. Local tests used Python 3.12; the full GitHub
-Python/OS matrix has not executed successfully.
+external security certification. Local tests used Python 3.12. The hosted Python 3.11/3.13 matrix subsequently
+passed on Windows and Ubuntu; see the separate hosted receipt below.
 
 Earlier failed attempts remain retained. The first Linux/container parser test
 used 5,000 nesting levels, below the Linux parser's failure threshold; 20,000
@@ -105,6 +105,14 @@ GitHub's baseline CI run was blocked before job steps by billing/spending limits
 [run 38512243636](https://github.com/ZuluYokohama/jovin-harness/actions/runs/38512243636).
 Local acceptance is recorded separately. No account settings were changed; a
 failed infrastructure run is not evidence of executed tests.
+
+The repair subsequently passed all six jobs in [hosted run
+38515995852](https://github.com/ZuluYokohama/jovin-harness/actions/runs/38515995852)
+at source commit `285a52085c066050e04e26b648e0ad3a022ce136`: the four Windows/Ubuntu
+Python 3.11/3.13 unit jobs, real-container job and package job all executed and
+passed. Full logs and job receipts are retained as `ci-285a520-log.txt` and
+`ci-285a520-jobs.json`. This documentation/evidence update changes no executable
+source. Current draft-PR checks remain visible on GitHub.
 
 ## Measurements
 

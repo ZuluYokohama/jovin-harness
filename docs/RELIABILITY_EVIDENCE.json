@@ -382,13 +382,27 @@
     "source-and-fixture-hashes.json": {
       "sha256": "d7a0d6d8f9ca4636900d03d23826ad84eec42f4c4c0df626c94e677389721b96",
       "bytes": 53157338
+    },
+    "ci-285a520-jobs.json": {
+      "sha256": "07e8519299f0674c8d26f43622b6fe6801f53508d645a3f6aca11ba536aed656",
+      "bytes": 14594
+    },
+    "ci-285a520-log.txt": {
+      "sha256": "51a6abdc60f837ba6c47e9df56b6e641de5517c668f02543f03f64a1725ac692",
+      "bytes": 258926
     }
   },
   "acceptance": {
     "functional": true,
     "real_container": true,
-    "local_only": true,
-    "github_ci": "Baseline jobs did not start because of account payment/spending restrictions; see baseline-ci-annotations.json. Current PR status is retained separately in delivery.json after publication.",
+    "local_only": false,
+    "github_ci": {
+      "source_commit": "285a52085c066050e04e26b648e0ad3a022ce136",
+      "run_url": "https://github.com/ZuluYokohama/jovin-harness/actions/runs/38515995852",
+      "jobs_passed": 6,
+      "baseline_failure_retained": "baseline-ci-annotations.json",
+      "account_settings_changed": false
+    },
     "performance_speedup_established": false
   },
   "limitations": [
