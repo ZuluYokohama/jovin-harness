@@ -173,7 +173,8 @@ class Sandbox:
         return [
             "create", "--pull", "never", "--name", name, "--label", f"{RUN_LABEL}={run_id}",
             "--interactive", "--network", "none", "--read-only",
-            "--cap-drop", "ALL", "--cap-add", "SETUID", "--cap-add", "SETGID", "--cap-add", "KILL",
+            "--cap-drop", "ALL",
+            "--cap-add", "SETUID", "--cap-add", "SETGID", "--cap-add", "KILL", "--cap-add", "CHOWN",
             "--security-opt", "no-new-privileges", "--user", "0:0",
             "--memory", str(limits.memory_bytes), "--memory-swap", str(limits.memory_bytes),
             "--pids-limit", str(limits.pids), "--cpus", str(limits.cpus),
@@ -201,7 +202,7 @@ class Sandbox:
         expect("read-only root", host.get("ReadonlyRootfs"), True)
         expect("privileged", host.get("Privileged"), False)
         expect("dropped capabilities", _caps(host.get("CapDrop")), {"ALL"})
-        expect("added capabilities", _caps(host.get("CapAdd")), {"SETUID", "SETGID", "KILL"})
+        expect("added capabilities", _caps(host.get("CapAdd")), {"SETUID", "SETGID", "KILL", "CHOWN"})
         expect("memory", host.get("Memory"), limits.memory_bytes)
         expect("memory+swap", host.get("MemorySwap"), limits.memory_bytes)
         expect("pids limit", host.get("PidsLimit"), limits.pids)
@@ -235,9 +236,12 @@ class Sandbox:
                 raise InputTooLarge(f"{name} is larger than {limit} bytes")
 
     def run(self, mode: str, code: str, tests: str | None = None, stdin: str | None = None,
-            timeout_s: int | None = None) -> dict:
+            timeout_s: int | None = None, isolation: str = "process") -> dict:
         if mode not in ("verify", "run"):
             raise ValueError("mode must be verify or run")
+        if isolation not in ("process", "shared"):
+            raise ValueError("isolation must be process or shared")
+        expected_isolation = isolation if mode == "verify" else "none"
         self.check_inputs(code=code, tests=tests, stdin=stdin)
         limits = self.settings.limits
         timeout_s = min(timeout_s or limits.timeout_s, limits.timeout_s)
@@ -247,7 +251,7 @@ class Sandbox:
                                      "run `jovin-harness image build` again")
         run_id = secrets.token_hex(8)
         name = f"jovin-harness-{run_id}"
-        payload = json.dumps({"mode": mode, "code": code, "tests": tests, "stdin": stdin,
+        payload = json.dumps({"mode": mode, "isolation": isolation, "code": code, "tests": tests, "stdin": stdin,
                               "timeout_s": timeout_s, "max_output_bytes": limits.max_output_bytes}).encode()
         sandbox = {"runtime": self.settings.runtime, "engine": engine, "image": image,
                    "limits": {**limits.as_dict(), "timeout_s": timeout_s}, "run_id": run_id,
@@ -266,6 +270,11 @@ class Sandbox:
             else:
                 sandbox["inspect_verified"] = True
                 result = self._start(name, payload, timeout_s)
+                reported = result.get("isolation")
+                if (reported is not None or result.get("status") in ("passed", "completed")) \
+                        and reported != expected_isolation:
+                    result = {**result, "status": "blocked",
+                              "reason": "the sandbox reported a different isolation mode than requested"}
                 kernel = result.get("kernel") or {}
                 sandbox["kernel_verified"] = (kernel.get("memory_max") == str(limits.memory_bytes)
                                               and kernel.get("pids_max") == str(limits.pids))

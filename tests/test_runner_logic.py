@@ -129,3 +129,56 @@ def test_generator_tests_are_rejected(source):
 def test_nested_generators_inside_a_test_are_fine():
     source = "def test_x():\n    def gen():\n        yield 1\n    assert list(gen()) == [1]\n"
     assert runner.expected_tests(source) == ["<module>", "test_x"]
+
+
+codec = {}
+exec(runner.CODEC, codec)  # the codec both sides of the process boundary run
+
+
+@pytest.mark.parametrize("value", [
+    None, True, 0, -12345678901234567890, 1.5, float("inf"), "text é", b"\x00\xff",
+    [1, [2, "x"]], (1, (2,)), {1, 2}, frozenset({"a"}), {"k": [1, 2], (1, 2): {3}},
+    {"$t": "a dict whose key looks like a tag"},
+])
+def test_codec_round_trips_plain_data(value):
+    import json
+    wire = json.loads(json.dumps(codec["encode"](value), allow_nan=False))
+    decoded = codec["decode"](wire)
+    assert decoded == value and type(decoded) is type(value)
+
+
+def test_codec_round_trips_nan():
+    import math
+    assert math.isnan(codec["decode"](codec["encode"](float("nan"))))
+
+
+@pytest.mark.parametrize("value", [
+    object(), print, (x for x in ()), type("Int", (int,), {})(3), [object()]])
+def test_codec_refuses_anything_but_plain_data(value):
+    with pytest.raises(codec["Unsupported"]):
+        codec["encode"](value)
+
+
+@pytest.mark.parametrize("wire", [
+    {"$x": []}, {"$t": [], "$s": []}, {"$d": [[1]]}, {"$f": "1.0"}, {"$b": "!!"}, 1e999])
+def test_codec_rejects_malformed_wire_values(wire):
+    with pytest.raises((ValueError, TypeError)):
+        codec["decode"](wire)
+
+
+def test_codec_limits_depth():
+    deep = []
+    for _ in range(100):
+        deep = [deep]
+    with pytest.raises(codec["Unsupported"]):
+        codec["encode"](deep)
+
+
+def test_exported_names_come_from_the_code_syntax():
+    source = ("import math\nLIMIT = 3\ndef add(a, b):\n    return a + b\nsquare = lambda x: x * x\n"
+              "class Stack:\n    pass\nasync def fetch():\n    pass\n"
+              "def _helper():\n    pass\ndef __dunder__():\n    pass\n")
+    exports, unavailable = runner.exported_names(source)
+    assert exports == ["add", "square", "_helper"]
+    assert set(unavailable) == {"Stack", "fetch"}
+    assert runner.exported_names("def broken(:\n") == ([], {})

@@ -5,6 +5,9 @@ receipt of every run.
 
 - Before saying Python code works, call `verify_python` with the code and tests that exercise the
   behavior you changed, including edge cases. A passing run of trivial tests is not evidence.
+- Keep the default `isolation="process"` whenever the tests can work through function calls and
+  return values. Use `isolation="shared"` only when the tests need the code's classes or objects, and
+  say so when you report the result.
 - Report the outcome as it is. If tests fail, say so and show the failing test and message, then fix
   and re-run. Never describe a failed, timed-out or blocked run as a success.
 - Cite the `receipt_id` of the run you're relying on, so a person can check it with

@@ -102,7 +102,7 @@ Add [templates/AGENTS.snippet.md](../templates/AGENTS.snippet.md) to your projec
 
 | Tool | Use it to |
 |---|---|
-| `verify_python(code, tests, timeout_s?)` | Run assert-style tests against code. Returns per-test results and a receipt. |
+| `verify_python(code, tests, timeout_s?, isolation?)` | Run assert-style tests against code. Returns per-test results and a receipt. |
 | `run_python(code, stdin?, timeout_s?)` | Run a program and see its exit code and output. |
 | `get_receipt(receipt_id)` | Fetch the full record of a run. |
 | `verify_receipt(receipt_id \| receipt)` | Check a receipt's hash and its place in the chain. |
@@ -111,3 +111,9 @@ Add [templates/AGENTS.snippet.md](../templates/AGENTS.snippet.md) to your projec
 Tests are plain Python. Top-level `assert` statements run as the `<module>` step, and every
 top-level `test_*` function without arguments runs as its own test. The code's names are available
 directly, or through `from solution import name`.
+
+By default (`isolation="process"`) the tests and the code run in separate processes. Tests call the
+code's top-level functions with plain data and get plain data back. Arguments are copied, so in-place
+mutation isn't visible to the test; check return values instead. Module-level constants are
+available too. If the tests need the code's classes or objects, pass `isolation="shared"`. That runs
+both in one process, and the receipt records the weaker `shared_interpreter` integrity.

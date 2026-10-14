@@ -151,3 +151,38 @@ def test_http_transport_end_to_end(tmp_path):
     finally:
         server.should_exit = True
         thread.join(timeout=10)
+
+
+def test_verify_python_schema_offers_isolation(tmp_path):
+    harness, _ = make_harness(tmp_path)
+
+    async def main():
+        async with Client(build_server(harness)) as client:
+            return {tool.name: tool for tool in (await client.list_tools()).tools}
+
+    schema = anyio.run(main)["verify_python"].input_schema["properties"]["isolation"]
+    assert schema["enum"] == ["process", "shared"] and schema["default"] == "process"
+
+
+def test_access_gate_does_not_wait_forever_for_a_stalled_body(monkeypatch):
+    import jovin_harness.server as server_module
+    monkeypatch.setattr(server_module, "DENY_DRAIN_SECONDS", 0.2)
+
+    async def inner(scope, receive, send):
+        raise AssertionError("must not be reached")
+
+    async def stalled():
+        await anyio.sleep(30)
+
+    sent = []
+
+    async def send(message):
+        sent.append(message)
+
+    async def main():
+        gate = AccessGate(inner, mode="bearer", secret="s" * 43)
+        with anyio.fail_after(5):
+            await gate({"type": "http", "method": "POST", "path": "/mcp", "headers": []}, stalled, send)
+
+    anyio.run(main)
+    assert sent[0]["status"] == 401

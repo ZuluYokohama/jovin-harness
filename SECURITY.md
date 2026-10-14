@@ -11,12 +11,25 @@ what it doesn't do, and how to report a problem.
 - **No network** (`--network none`), a **read-only root filesystem**, and a 16 MiB `noexec` tmpfs
   at `/tmp` as the only writable place.
 - **All Linux capabilities dropped.** The in-container supervisor keeps only `SETUID`/`SETGID` (to
-  drop the worker to uid 65534) and `KILL` (to stop it at the deadline). The worker has none. Plus `no-new-privileges`, the engine's default seccomp profile, and limits
-  on memory (512 MiB, no swap), PIDs (64), CPU (1), open files (64) and file size (16 MiB).
+  drop the workers to unprivileged uids), `CHOWN` (to give each worker a private scratch directory)
+  and `KILL` (to stop them at the deadline). The workers have none. Plus `no-new-privileges`, the engine's default seccomp profile, and limits on memory (512 MiB,
+  no swap), PIDs (64), CPU (1), open files (64) and file size (16 MiB).
 - **Privilege separation inside the container.** The supervisor (PID 1, root, non-dumpable) never
-  runs submitted code. A worker does, as uid/gid 65534 with no capabilities. The supervisor checks
-  the worker's uid, gid, capabilities, `NoNewPrivs` and seccomp mode through `/proc` before sending it
-  any code. The worker can't signal the supervisor, read its memory, or write to its output.
+  runs submitted code. Before sending any code, it checks each worker's uid, gid, capabilities,
+  `NoNewPrivs` and seccomp mode through `/proc`. Workers can't signal the supervisor, read its
+  memory, or write to its output.
+- **Process isolation for verification (default).** The code under test runs as uid 65534 and the
+  agent's tests as uid 65533, in separate processes. Neither can signal the other or read its memory
+  or file descriptors. Tests reach the code only through proxies that exchange plain data over a
+  pipe. The codec decodes to built-in types only (no pickle, no custom objects), so returned values
+  can't run code or override comparisons. Exceptions come back as builtin exception types. Harness
+  failures, such as the code exiting mid-call or an unsupported value, are raised as a
+  `BaseException` that a test's `except Exception` can't swallow. Each worker gets a private 0700
+  home and `TMPDIR`, and `/tmp` and `/dev/shm` are made unwritable, so the code can't plant files for
+  the tests. The workers still share the loopback interface and SysV IPC, so tests that deliberately
+  read from those could see data the code left there. The test process reports results on a pipe the code
+  process doesn't hold, and the supervisor still judges against its own expected-test list. Receipts
+  carry `integrity: "process_isolated"`.
 - **Settings are verified before start.** The host inspects each container after creating it and
   refuses to start it unless the image ID, network, mounts, capabilities, security options, limits,
   tmpfs, ulimits and log driver match the profile.
@@ -32,11 +45,14 @@ what it doesn't do, and how to report a problem.
 - **A container is not a virtual machine.** Containers share the host kernel, so a kernel
   vulnerability could break isolation. If you expose the HTTP endpoint beyond your own machine, run
   the engine inside a VM (Docker Desktop and WSL 2 already do) or under gVisor (`--runtime=runsc`).
-- **`shared_interpreter` verdicts can be faked by adversarial code.** In `verify_python`, the tests
-  and the code under test share one Python process, so code written to cheat can tamper with the
-  test functions or the result pipe. The verdict is reliable for honest mistakes, which is what agents
-  usually make. Receipts carry `integrity: "shared_interpreter"` so nobody mistakes it for more. A
-  stronger mode, with tests and code in separate processes, is planned.
+- **`isolation="shared"` verdicts can be faked by adversarial code.** That mode runs tests and code
+  in one Python process (needed when tests use the code's classes or objects), so code written to
+  cheat can tamper with the test functions or the result pipe. The verdict is reliable for honest
+  mistakes. Receipts carry `integrity: "shared_interpreter"` so nobody mistakes it for more.
+- **Process isolation proves what the tests check, nothing more.** The code can still behave
+  differently on inputs the tests don't cover, or detect that it's being tested. Weak tests give weak
+  evidence, and `tests_sha256` in the receipt shows exactly which tests ran. The tests themselves are
+  agent-written and run unprivileged; they're judged, not trusted.
 - **Receipts are tamper-evident, not signed.** Each receipt hashes its contents and the previous
   receipt, so edits, deletions and reordering are detected. Someone with write access to the data
   directory could rebuild a consistent chain, though. Export the chain head

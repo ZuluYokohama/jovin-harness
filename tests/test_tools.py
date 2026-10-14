@@ -19,7 +19,7 @@ def test_verify_python_returns_verdict_and_receipt(tmp_path):
     harness, _ = make_harness(tmp_path)
     out = harness.verify_python("def f():\n    return 1\n", "assert f() == 1\n")
     assert out["passed"] and out["status"] == "passed"
-    assert out["integrity"] == "shared_interpreter"
+    assert out["integrity"] == "process_isolated"
     receipt = harness.get_receipt(out["receipt_id"])
     assert receipt["sha256"] == out["receipt_sha256"]
     assert receipt["inputs"]["code_sha256"] and receipt["inputs"]["tests_sha256"]
@@ -101,3 +101,25 @@ def test_surrogates_in_sandbox_output_still_get_a_receipt(tmp_path):
     docker.result = dict(passing(harness.settings), stderr_tail="\ud800")
     out = harness.verify_python("x = 1", "assert x == 1")
     assert out["receipt_id"] and harness.verify_receipt(receipt_id=out["receipt_id"])["valid"]
+
+
+def test_shared_isolation_is_labelled_in_the_receipt(tmp_path):
+    from fake_docker import passing_result as passing
+    harness, docker = make_harness(tmp_path)
+    docker.result = dict(passing(harness.settings), isolation="shared")
+    out = harness.verify_python("x = 1", "assert x == 1", isolation="shared")
+    receipt = harness.get_receipt(out["receipt_id"])
+    assert out["integrity"] == receipt["integrity"] == "shared_interpreter"
+    assert receipt["inputs"]["params"]["isolation"] == "shared"
+    with pytest.raises(ToolError):
+        harness.verify_python("x = 1", "assert x == 1", isolation="none")
+
+
+def test_integrity_label_comes_from_the_reported_isolation(tmp_path):
+    from fake_docker import passing_result as passing
+    harness, docker = make_harness(tmp_path)
+    failed = dict(passing(harness.settings), status="failed")
+    failed.pop("isolation")
+    docker.result = failed
+    out = harness.verify_python("x = 1", "assert x == 2")
+    assert out["integrity"] == "unverified"
