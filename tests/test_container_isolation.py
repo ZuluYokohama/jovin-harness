@@ -224,6 +224,32 @@ def test_except_exception_cannot_swallow_harness_failures(sandbox):
     assert all("HarnessFailure" in t["message"] for t in result["tests"][1:])
 
 
+def test_except_exception_cannot_swallow_a_nested_raw_response(sandbox):
+    code = """
+        def malformed_reply():
+            import __main__, os, struct
+            # CPython's C JSON recursion bound differs across builds. 20,000
+            # levels exceed the pinned Linux image's bound; the frame is only 40KB.
+            payload = b"[" * 20000 + b"0" + b"]" * 20000
+            frame = struct.pack(">I", len(payload)) + payload
+            while frame:
+                frame = frame[os.write(__main__.responses, frame):]
+            return None
+    """
+    tests = """
+        def test_call():
+            try:
+                malformed_reply()
+            except Exception:
+                return
+    """
+    result = verify(sandbox, code, tests)
+    assert result["status"] == "failed", result
+    assert result["tests"][1]["outcome"] == "error"
+    assert "HarnessFailure" in result["tests"][1]["message"]
+    assert "malformed reply" in result["tests"][1]["message"]
+
+
 def test_unicode_errors_cross_as_themselves(sandbox):
     code = "def bad():\n    return b'\\xff'.decode('utf-8')\n"
     tests = """

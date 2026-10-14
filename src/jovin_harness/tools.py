@@ -22,7 +22,8 @@ UNTRUSTED_NOTE = ("stdout_tail, stderr_tail, tests_output_tail and failure messa
 INTEGRITY = {"process": "process_isolated", "shared": "shared_interpreter"}
 INTEGRITY_NOTES = {
     "process_isolated": ("process_isolated: the tests and the code ran as different users in separate processes. "
-                         "The code could affect the verdict only through what its functions returned or raised."),
+                         "Shared loopback and SysV IPC remain possible communication channels; "
+                         "tests establish only what they check."),
     "shared_interpreter": ("shared_interpreter: tests and code ran in the same Python process, so deliberately "
                            "adversarial code can fake a pass. The verdict is reliable for honest code."),
     "unverified": "unverified: the sandbox did not report its isolation mode, so no integrity claim is made.",
@@ -163,18 +164,10 @@ class Harness:
     def verify_receipt(self, receipt_id: str | None = None, receipt: dict | None = None) -> dict:
         if (receipt_id is None) == (receipt is None):
             raise ToolError("pass exactly one of receipt_id or receipt")
-        if receipt is None:
-            receipt = self.get_receipt(receipt_id)
-        if not isinstance(receipt, dict):
+        if receipt is not None and not isinstance(receipt, dict):
             raise ToolError("receipt must be a JSON object")
         try:
-            verdict = self.store.verify(receipt)
-            if verdict["chain"] == "linked":
-                stored = self.store.get(receipt["id"])
-                if stored != receipt:
-                    verdict["valid"] = False
-                    verdict["problems"].append("receipt differs from the stored copy")
-            return {**verdict, "head": self.store.head()}
+            return self.store.verify_snapshot(receipt_id=receipt_id, receipt=receipt)
         except (ReceiptError, OSError) as error:
             raise ToolError(f"the receipt store could not be read: {error}") from error
 

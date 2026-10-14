@@ -23,6 +23,7 @@ def container_inspect(settings, run_id):
     limits = settings.limits
     return {
         "Image": settings.image,
+        "State": {"Status": "exited", "Running": False},
         "Mounts": [],
         "Config": {"User": "0:0", "Labels": {RUN_LABEL: run_id}},
         "HostConfig": {
@@ -61,6 +62,9 @@ class FakeProcess:
             raise subprocess.TimeoutExpired("docker", timeout)
         return 0
 
+    def poll(self):
+        return None if self.hang and not self.killed else 0
+
     def kill(self):
         self.killed = True
 
@@ -76,7 +80,8 @@ class FakeDocker:
         self.image = {"Id": settings.image, "Architecture": "amd64",
                       "Config": {"Labels": {RUNNER_LABEL: runner_sha256()}, "Volumes": None}}
         self.result = result
-        self.state = state or {"ExitCode": 0, "OOMKilled": False}
+        self.state = state if state is not None else {"ExitCode": 0, "OOMKilled": False,
+                                                       "Status": "exited", "Running": False}
         self.inspect_override = None
         self.removed = set()
         self.remove_fails = False
@@ -104,9 +109,9 @@ class FakeDocker:
             case ["container", "inspect", name]:
                 if name in self.removed:
                     return fail(b"No such container")
-                info = self.inspect_override or container_inspect(self.settings, self.run_id)
+                info = self.inspect_override or container_inspect(self.settings, getattr(self, "run_id", "a" * 16))
                 return ok([info])
-            case ["rm", "--force", name]:
+            case ["rm", "--force", name] | ["rm", name]:
                 if not self.remove_fails:
                     self.removed.add(name)
                 return ok()

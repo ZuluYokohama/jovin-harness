@@ -167,3 +167,268 @@ def test_rewritten_middle_receipt_with_patched_index_is_detected(tmp_path):
     chain = store.verify_chain()
     assert not chain["valid"]
     assert any(last["id"] in p and "own chain link" in p for p in chain["problems"])
+
+def make_orphan(store, previous, suffix="aaaaaaaaaaaa"):
+    receipt = dict(previous, id="20260101T000000Z-" + suffix, prev_sha256=previous["sha256"])
+    receipt["sha256"] = receipt_hash(receipt)
+    store.path_for(receipt["id"]).write_bytes(canonical_json(receipt))
+    return receipt
+
+
+def index_line(receipt):
+    return canonical_json({key: receipt[key] for key in ("id", "sha256", "prev_sha256")}) + b"\n"
+
+
+@pytest.mark.parametrize("raw", [b"null\n", b"[]\n", b"{}\n", b'{"id":[]}\n', b"\xff\n",
+                                  b'{"id":"a","id":"b"}\n'])
+def test_malformed_index_is_a_receipt_error(tmp_path, raw):
+    store = ReceiptStore(tmp_path)
+    store.index.write_bytes(raw)
+    for read in (store.head, store.verify_chain):
+        with pytest.raises(ReceiptError):
+            read()
+    before = set(tmp_path.iterdir())
+    with pytest.raises(ReceiptError):
+        store.append(body())
+    assert store.index.read_bytes() == raw and set(tmp_path.iterdir()) == before
+
+
+@pytest.mark.parametrize("raw", [b"null", b"[]", b"{}", b"\xff", b'{"x":NaN}', b'{"id":"a","id":"b"}'])
+def test_malformed_receipt_has_structured_failure(tmp_path, raw):
+    store = ReceiptStore(tmp_path)
+    receipt = store.append(body())
+    store.path_for(receipt["id"]).write_bytes(raw)
+    with pytest.raises(ReceiptError):
+        store.get(receipt["id"])
+    verdict = store.verify_chain()
+    assert not verdict["valid"] and verdict["problems"]
+
+
+@pytest.mark.parametrize("value", [None, [], {"format": "other"}, {"result": float("inf")}])
+def test_external_malformed_receipt_is_invalid_not_an_attribute_error(tmp_path, value):
+    verdict = ReceiptStore(tmp_path).verify(value)
+    assert not verdict["valid"] and verdict["problems"]
+
+
+def test_invalid_receipt_id_types_and_trailing_newline(tmp_path):
+    for value in (None, [], 5, "20260101T000000Z-aaaaaaaaaaaa\n"):
+        with pytest.raises(ReceiptError):
+            ReceiptStore(tmp_path).path_for(value)
+
+
+def test_duplicate_index_identity_is_rejected(tmp_path):
+    store = ReceiptStore(tmp_path)
+    receipt = store.append(body())
+    store.index.write_bytes(index_line(receipt) * 2)
+    with pytest.raises(ReceiptError, match="repeats receipt id"):
+        store.verify_chain()
+
+
+@pytest.mark.parametrize("cut", [1, 35, -1])
+def test_torn_final_index_is_repaired_without_rewriting_receipts(tmp_path, cut):
+    store = ReceiptStore(tmp_path)
+    first = store.append(body(1))
+    orphan = make_orphan(store, first)
+    first_bytes, orphan_bytes = (store.path_for(row["id"]).read_bytes() for row in (first, orphan))
+    prefix = store.index.read_bytes()
+    damaged = prefix + index_line(orphan)[:cut]
+    store.index.write_bytes(damaged)
+    with pytest.raises(ReceiptError, match="interrupted final line"):
+        store.head()
+    third = store.append(body(3))
+    assert third["prev_sha256"] == orphan["sha256"]
+    assert store.verify_chain()["valid"] and store.head()["count"] == 3
+    backups = list((tmp_path / "recovery").glob("*.jsonl"))
+    assert len(backups) == 1 and backups[0].read_bytes() == damaged
+    assert store.index.read_bytes().startswith(prefix + index_line(orphan))
+    assert store.path_for(first["id"]).read_bytes() == first_bytes
+    assert store.path_for(orphan["id"]).read_bytes() == orphan_bytes
+
+
+@pytest.mark.parametrize("tail", [b"", b'{"id":'])
+def test_ambiguous_orphans_are_never_selected_by_filename_order(tmp_path, tail):
+    store = ReceiptStore(tmp_path)
+    first = store.append(body(1))
+    make_orphan(store, first, "aaaaaaaaaaaa")
+    make_orphan(store, first, "bbbbbbbbbbbb")
+    original = store.index.read_bytes() + tail
+    store.index.write_bytes(original)
+    with pytest.raises(ReceiptError, match="ambiguous"):
+        store.append(body(4))
+    assert store.index.read_bytes() == original
+    assert len(list(tmp_path.glob("*.json"))) == 3
+
+
+@pytest.mark.parametrize("problem", ["mismatched-tail", "bad-orphan-hash", "invalid-prefix-chain", "interior-json"])
+def test_torn_recovery_requires_exact_bytes_and_valid_preceding_chain(tmp_path, problem):
+    store = ReceiptStore(tmp_path)
+    first = store.append(body(1))
+    orphan = make_orphan(store, first)
+    tail = index_line(orphan)[:-1]
+    if problem == "mismatched-tail":
+        tail = tail.replace(orphan["sha256"].encode(), b"f" * 64)
+    elif problem == "bad-orphan-hash":
+        store.path_for(orphan["id"]).write_bytes(canonical_json(dict(orphan, result={"exit_code": 99})))
+    elif problem == "invalid-prefix-chain":
+        store.path_for(first["id"]).write_bytes(canonical_json(dict(first, result={"exit_code": 99})))
+    prefix = b"{broken\n" if problem == "interior-json" else store.index.read_bytes()
+    original = prefix + tail
+    store.index.write_bytes(original)
+    with pytest.raises(ReceiptError):
+        store.append(body(3))
+    assert store.index.read_bytes() == original
+    assert not (tmp_path / "recovery").exists()
+
+
+def test_recovery_replacement_failure_keeps_index_and_backup(tmp_path, monkeypatch):
+    import jovin_harness.receipts as receipts
+    store = ReceiptStore(tmp_path)
+    first = store.append(body(1))
+    orphan = make_orphan(store, first)
+    original = store.index.read_bytes() + index_line(orphan)[:30]
+    store.index.write_bytes(original)
+    replace = receipts.os.replace
+
+    def fail_replace(source, target):
+        if target == store.index:
+            assert any(path.read_bytes() == original for path in (tmp_path / "recovery").glob("*.jsonl"))
+            raise OSError("synthetic index replacement failure")
+        return replace(source, target)
+
+    monkeypatch.setattr(receipts.os, "replace", fail_replace)
+    with pytest.raises(OSError, match="replacement failure"):
+        store.append(body(3))
+    assert store.index.read_bytes() == original
+    assert not list(tmp_path.glob("*.partial"))
+    monkeypatch.setattr(receipts.os, "replace", replace)
+    store.append(body(3))
+    assert store.verify_chain()["valid"]
+
+
+def test_verify_snapshot_reads_index_once_and_checks_stored_copy(tmp_path, monkeypatch):
+    store = ReceiptStore(tmp_path)
+    receipt = store.append(body())
+    reads = []
+    original = store._entries
+
+    def count_reads():
+        reads.append(1)
+        return original()
+
+    monkeypatch.setattr(store, "_entries", count_reads)
+    verdict = store.verify_snapshot(receipt_id=receipt["id"])
+    assert verdict["valid"] and verdict["head"]["head_sha256"] == receipt["sha256"]
+    assert reads == [1]
+    store.path_for(receipt["id"]).write_bytes(canonical_json(dict(receipt, result={"exit_code": 9})))
+    assert not store.verify_snapshot(receipt=receipt)["valid"]
+
+
+def test_readers_and_writers_share_consistent_snapshots(tmp_path):
+    from concurrent.futures import ThreadPoolExecutor
+    store = ReceiptStore(tmp_path)
+    first = store.append(body())
+    barrier = threading.Barrier(4)
+
+    def write_runs():
+        barrier.wait(timeout=5)
+        for number in range(20):
+            store.append(body(number))
+
+    def read_snapshots():
+        barrier.wait(timeout=5)
+        for _ in range(25):
+            assert store.verify_chain()["valid"]
+            verdict = store.verify_snapshot(receipt=first)
+            assert verdict["valid"] and verdict["head"]["count"] >= 1
+            assert store.get(first["id"]) == first
+
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        futures = [pool.submit(write_runs), *(pool.submit(read_snapshots) for _ in range(3))]
+        for future in futures:
+            future.result(timeout=20)
+    assert store.verify_chain()["count"] == 21
+
+
+def paused_append_process(directory, published, release):
+    store = ReceiptStore(directory)
+    append_index = store._append_index
+
+    def paused(receipt):
+        published.set()
+        if not release.wait(15):
+            raise RuntimeError("parent did not release paused writer")
+        append_index(receipt)
+
+    store._append_index = paused
+    store.append(body())
+
+
+def read_snapshot_process(directory, entered, done, verdicts):
+    entered.set()
+    try:
+        verdicts.put(ReceiptStore(directory).verify_chain())
+    finally:
+        done.set()
+
+
+def test_cross_process_reader_waits_until_receipt_and_index_are_published(tmp_path):
+    import multiprocessing
+    context = multiprocessing.get_context("spawn")
+    published, release, entered, done = (context.Event() for _ in range(4))
+    verdicts = context.Queue()
+    writer = context.Process(target=paused_append_process, args=(tmp_path, published, release))
+    reader = context.Process(target=read_snapshot_process, args=(tmp_path, entered, done, verdicts))
+    writer.start()
+    try:
+        assert published.wait(10)
+        reader.start()
+        assert entered.wait(10)
+        assert not done.wait(.2), "Reader observed the unpublished index while writer still held its lock"
+        release.set()
+        writer.join(15)
+        reader.join(15)
+        assert writer.exitcode == reader.exitcode == 0
+        assert verdicts.get(timeout=2) == {
+            "valid": True, "count": 1,
+            "head_sha256": ReceiptStore(tmp_path).head()["head_sha256"], "problems": []}
+    finally:
+        release.set()
+        for process in (writer, reader):
+            if process.pid is not None:
+                process.join(2)
+                if process.is_alive():
+                    process.terminate()
+                    process.join(2)
+        verdicts.close()
+        verdicts.join_thread()
+
+
+@pytest.mark.parametrize("position", [0, 1])
+def test_single_receipt_verification_checks_index_predecessor(tmp_path, position):
+    store = ReceiptStore(tmp_path)
+    receipts = [store.append(body(n)) for n in range(3)]
+    entries = [json.loads(line) for line in store.index.read_bytes().splitlines()]
+    entries[position]["prev_sha256"] = "f" * 64
+    damaged = b"".join(canonical_json(row) + b"\n" for row in entries)
+    store.index.write_bytes(damaged)
+    verdict = store.verify_snapshot(receipt_id=receipts[position]["id"])
+    assert not verdict["valid"] and verdict["chain"] == "broken"
+    assert any("index chain link" in problem for problem in verdict["problems"])
+    assert not store.verify_chain()["valid"]
+    with pytest.raises(ReceiptError, match="invalid index chain"):
+        store.append(body(4))
+    assert store.index.read_bytes() == damaged
+    assert len(list(tmp_path.glob("*.json"))) == 3
+
+
+def test_stored_receipt_id_is_bound_to_requested_filename(tmp_path):
+    store = ReceiptStore(tmp_path)
+    receipt = store.append(body())
+    replacement = dict(receipt, id="20260101T000000Z-aaaaaaaaaaaa")
+    replacement["sha256"] = receipt_hash(replacement)
+    store.path_for(receipt["id"]).write_bytes(canonical_json(replacement))
+    for read in (lambda: store.get(receipt["id"]),
+                 lambda: store.verify_snapshot(receipt_id=receipt["id"])):
+        with pytest.raises(ReceiptError, match="different id"):
+            read()
+    assert not store.verify_chain()["valid"]
