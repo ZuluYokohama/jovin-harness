@@ -96,4 +96,4 @@ ruff check .
 
 ## License
 
-Apache-2.0. See [LICENSE](LICENSE) and [NOTICE](NOTICE).
+This project is licensed under the [PolyForm Noncommercial License 1.0.0](LICENSE). Commercial use requires a separate license from the copyright holder, B. Jones (b.jones@jtech.ai). See [NOTICE](NOTICE). Versions published before 2026-10-16 were released under the Apache License 2.0, and those versions keep it.

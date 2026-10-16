@@ -1,7 +1,7 @@
 # jovin-harness
 
 An MCP server that runs agent-written Python in hardened, disposable containers and keeps
-hash-chained receipts. It is Apache-2.0 and written fresh: don't copy code from JoVin or Renigma,
+hash-chained receipts. It is licensed under the PolyForm Noncommercial License 1.0.0 (Apache-2.0 before 2026-10-16) and written fresh: don't copy code from JoVin or Renigma,
 which are PolyForm Noncommercial. Reimplementing their published ideas is fine.
 
 - `src/jovin_harness/sandbox_image/runner.py` runs inside the container as PID 1 and uses only the

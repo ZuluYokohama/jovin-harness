@@ -7,7 +7,7 @@ name = "jovin-harness"
 dynamic = ["version"]
 description = "An MCP server that lets AI agents check their code in a hardened, disposable container and keeps hash-chained receipts"
 readme = "README.md"
-license = "Apache-2.0"
+license = "PolyForm-Noncommercial-1.0.0"
 license-files = ["LICENSE", "NOTICE"]
 requires-python = ">=3.11"
 authors = [{ name = "Zulu Operations" }]
