@@ -118,7 +118,7 @@ source. Current draft-PR checks remain visible on GitHub.
 
 [The receipt benchmark](../tools/benchmark_receipts.py) uses 10, 1,000 and 10,000
 synthetic canonical v1 records. Both source versions performed 405 timed API calls,
-33 fixture prechecks and 240 reads overlapping append calls, with zero errors or
+33 fixture prechecks and 240 concurrent reads, with zero errors or
 invalid snapshots. Every mutating repetition starts from its own exact-size
 fixture. Five repeats were used for sequential operations.
 

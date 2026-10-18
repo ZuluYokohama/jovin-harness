@@ -1,8 +1,12 @@
 import json
+import os
+import stat
 import threading
+from types import SimpleNamespace
 
 import pytest
 
+from jovin_harness import receipts
 from jovin_harness.receipts import (
     FORMAT,
     ReceiptError,
@@ -303,6 +307,69 @@ def test_recovery_replacement_failure_keeps_index_and_backup(tmp_path, monkeypat
     monkeypatch.setattr(receipts.os, "replace", replace)
     store.append(body(3))
     assert store.verify_chain()["valid"]
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not support directory fsync")
+@pytest.mark.parametrize("recover", [False, True])
+def test_replacements_sync_directory_before_appending_index(tmp_path, monkeypatch, recover):
+    store = ReceiptStore(tmp_path)
+    if recover:
+        first = store.append(body(1))
+        orphan = make_orphan(store, first)
+        store.index.write_bytes(store.index.read_bytes() + index_line(orphan)[:30])
+    events = []
+    replace, fsync, append_index = receipts.os.replace, receipts.os.fsync, store._append_index
+
+    def track_replace(source, target):
+        replace(source, target)
+        events.append("index replaced" if target == store.index else "receipt replaced")
+
+    def track_fsync(fd):
+        fsync(fd)
+        if stat.S_ISDIR(os.fstat(fd).st_mode):
+            events.append("directory synced")
+
+    def track_append(receipt):
+        events.append("index append")
+        append_index(receipt)
+
+    monkeypatch.setattr(receipts.os, "replace", track_replace)
+    monkeypatch.setattr(receipts.os, "fsync", track_fsync)
+    monkeypatch.setattr(store, "_append_index", track_append)
+    store.append(body(3))
+    expected = ["receipt replaced", "directory synced", "index append"]
+    if recover:
+        expected = ["index replaced", "directory synced", *expected]
+    assert events == expected
+    assert store.verify_chain()["valid"]
+
+
+def test_directory_fsync_is_skipped_on_windows(tmp_path, monkeypatch):
+    # No directory file operations are available in this Windows stand-in.
+    monkeypatch.setattr(receipts, "os", SimpleNamespace(name="nt"))
+    receipts._fsync_dir(tmp_path)
+
+
+@pytest.mark.skipif(os.name == "nt", reason="Windows does not support directory fsync")
+def test_directory_fsync_failure_closes_descriptor(tmp_path, monkeypatch):
+    descriptors = []
+    open_dir = receipts.os.open
+
+    def track_open(*args):
+        fd = open_dir(*args)
+        descriptors.append(fd)
+        return fd
+
+    def fail_fsync(fd):
+        raise OSError("synthetic directory sync failure")
+
+    monkeypatch.setattr(receipts.os, "open", track_open)
+    monkeypatch.setattr(receipts.os, "fsync", fail_fsync)
+    with pytest.raises(OSError, match="directory sync failure"):
+        receipts._fsync_dir(tmp_path)
+    assert len(descriptors) == 1
+    with pytest.raises(OSError):
+        os.fstat(descriptors[0])
 
 
 def test_verify_snapshot_reads_index_once_and_checks_stored_copy(tmp_path, monkeypatch):

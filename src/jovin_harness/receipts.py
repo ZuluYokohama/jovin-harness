@@ -56,6 +56,16 @@ def new_receipt_id(now: datetime | None = None) -> str:
 _process_lock = threading.Lock()
 
 
+def _fsync_dir(directory: Path) -> None:
+    if os.name == "nt":
+        return
+    fd = os.open(directory, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
 @contextlib.contextmanager
 def _exclusive(path: Path) -> Iterator[None]:
     """Serialize readers and writers across threads (in-process lock) and processes (OS file lock)."""
@@ -225,6 +235,7 @@ class ReceiptStore:
             partial = path.with_name(path.name + ".partial")
             self._write_new(partial, canonical_json(receipt))
             os.replace(partial, path)
+            _fsync_dir(path.parent)
             self._append_index(receipt)
             return receipt
 
@@ -281,6 +292,7 @@ class ReceiptStore:
             try:
                 self._write_new(partial, prefix + canonical_json(_index_entry(receipt)) + b"\n")
                 os.replace(partial, self.index)
+                _fsync_dir(self.index.parent)
             finally:
                 partial.unlink(missing_ok=True)
         else:
