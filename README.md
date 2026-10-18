@@ -8,23 +8,26 @@ and tests. The harness runs them in a fresh, locked-down container and returns t
 **receipt**: a hash-chained record of exactly what ran, under which limits, and what the sandbox
 reported.
 
-- **No code runs on your machine.** Every call gets a new container with no network, a read-only
-  root, no capabilities, and memory, PID, CPU and file limits. The container's settings are inspected
+- **Submitted code runs only inside disposable containers.** Every call gets a new container with
+  no network, a read-only root, unprivileged workers, and memory, PID, CPU and file limits. The container's settings are inspected
   before it starts. With no container engine, the harness refuses to run rather than fall back to the
   host.
-- **The code under test can't touch the verdict.** By default the tests and the code run as
+- **Tests and candidate code are separated by default.** The tests and the code run as
   different users in separate processes. Tests call the code's functions through proxies that pass
-  plain data (numbers, strings, lists, dicts, tuples, sets, bytes), so the code influences the result
-  only through what its functions return or raise. A supervisor decides pass or fail against its own list of
+  plain data (numbers, strings, lists, dicts, tuples, sets, bytes). This prevents shared-interpreter
+  mutation; the remaining IPC and test-coverage limitations are documented in SECURITY.md. A supervisor decides pass or fail against its own list of
   expected tests. Receipts record `integrity: "process_isolated"`. For tests that need the code's
   classes or objects, `isolation="shared"` runs both in one process; such receipts say
   `"shared_interpreter"`. See [SECURITY.md](SECURITY.md).
 - **Receipts are tamper-evident.** Each receipt hashes its inputs and results and links to the
-  previous one, so `verify_receipt` notices edits, deletions and reordering. Failures are receipted
-  too.
+  previous one. `verify_receipt` checks one receipt and its recorded index link;
+  `jovin-harness receipts verify` checks the whole store, including missing receipt files and
+  reordering. Failures are receipted too. These records are unsigned; see SECURITY.md.
 
 > Status: early development (0.2.0.dev0). Read [SECURITY.md](SECURITY.md) for what the sandbox does
 > and doesn't protect against.
+
+Local repair validation and measurements: [reliability results](docs/RELIABILITY.md).
 
 ## Quick start
 

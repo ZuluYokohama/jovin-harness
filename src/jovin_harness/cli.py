@@ -85,7 +85,10 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "doctor":
             report = harness.sandbox_status()
             if args.sweep:
-                report["swept"] = harness.sandbox.sweep()
+                sweep = harness.sandbox.sweep()
+                report.update(swept=sweep["swept"], sweep_skipped=sweep["skipped"], sweep_failed=sweep["failed"])
+                if sweep["skipped"] or sweep["failed"]:
+                    report["ready"] = False
             _print(report)
             return 0 if report["ready"] else 1
         if args.command == "image":

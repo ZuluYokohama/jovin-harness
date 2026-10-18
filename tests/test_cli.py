@@ -40,3 +40,20 @@ def test_errors_exit_2_with_a_message(monkeypatch, tmp_path, capsys):
     patch_harness(monkeypatch, tmp_path)
     assert cli.main(["receipts", "show", "../../etc/passwd"]) == 2
     assert "invalid receipt id" in capsys.readouterr().err
+
+
+def test_doctor_sweep_exposes_unresolved_cleanup(monkeypatch, tmp_path, capsys):
+    harness = patch_harness(monkeypatch, tmp_path)
+    harness.sandbox.executor.remove_fails = True
+    assert cli.main(["doctor", "--sweep"]) == 1
+    report = json.loads(capsys.readouterr().out)
+    assert report["swept"] == []
+    assert len(report["sweep_failed"]) == 2
+
+
+def test_doctor_sweep_reports_confirmed_removal(monkeypatch, tmp_path, capsys):
+    patch_harness(monkeypatch, tmp_path)
+    assert cli.main(["doctor", "--sweep"]) == 0
+    report = json.loads(capsys.readouterr().out)
+    assert report["swept"] == ["aaa", "bbb"]
+    assert report["sweep_failed"] == report["sweep_skipped"] == []

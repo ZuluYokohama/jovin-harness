@@ -187,8 +187,8 @@ def test_status_reports_problems_without_raising(settings):
 
 def test_sweep_removes_labelled_leftovers(settings):
     sandbox, docker = make(settings)
-    assert sandbox.sweep() == ["aaa", "bbb"]
-    assert ["rm", "--force", "aaa"] in docker.calls
+    assert sandbox.sweep() == {"swept": ["aaa", "bbb"], "skipped": [], "failed": []}
+    assert ["rm", "aaa"] in docker.calls
 
 
 def test_cleanup_is_unconfirmed_when_inspect_fails_for_another_reason(settings):
@@ -244,3 +244,273 @@ def test_a_pass_without_a_reported_isolation_is_blocked(settings):
     result.pop("isolation")
     sandbox, _ = make(settings, result=result)
     assert sandbox.run("verify", "x=1", "assert x == 1")["result"]["status"] == "blocked"
+
+
+@pytest.mark.parametrize("state, expected", [
+    ({"Status": "exited", "Running": False, "ExitCode": 137, "OOMKilled": True}, "memory_limit"),
+    ({"Status": "exited", "Running": False, "ExitCode": 3, "OOMKilled": False}, "blocked"),
+    ({"Status": "exited", "Running": False, "ExitCode": 124, "OOMKilled": False}, "timeout"),
+    ({}, "blocked"),
+    ({"Status": "running", "Running": True, "ExitCode": 0, "OOMKilled": False}, "blocked"),
+])
+def test_engine_failure_overrides_reported_pass(settings, state, expected):
+    reported = passing_result(settings)
+    sandbox, _ = make(settings, result=reported, state=state)
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == expected
+    assert outcome["result"]["reported_result"] == reported
+    assert outcome["sandbox"]["cleanup"] == "removed"
+
+
+def test_host_deadline_overrides_reported_pass(settings):
+    reported = passing_result(settings)
+    sandbox, docker = make(settings)
+    docker.process = FakeProcess(stdout=json.dumps(reported).encode(), hang=True)
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "timeout"
+    assert outcome["result"]["reported_result"] == reported
+
+
+@pytest.mark.parametrize("failure", ["timeout", "nonzero"])
+@pytest.mark.parametrize("owned", [True, False])
+def test_uncertain_creation_cleans_only_owned_container(settings, failure, owned):
+    sandbox, docker = make(settings)
+    original = docker.run
+
+    def run(argv, **kwargs):
+        answer = original(argv, **kwargs)
+        if docker._args(argv)[0] == "create":
+            if not owned:
+                docker.inspect_override = container_inspect(settings, "unrelated")
+            if failure == "timeout":
+                raise SandboxUnavailable("CLI timed out after creating")
+            return fail(b"CLI response failure")
+        return answer
+
+    docker.run = run
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "blocked"
+    assert outcome["sandbox"]["cleanup"] == ("removed" if owned else "unconfirmed")
+    assert not outcome["sandbox"]["execution_may_have_started"]
+    assert any(call[0] == "rm" for call in docker.calls) is owned
+    assert not any(call[0] == "start" for call in docker.calls)
+
+
+def test_start_error_and_cleanup_exception_return_receiptable_failure(settings):
+    sandbox, docker = make(settings)
+
+    def start(argv):
+        raise OSError("attach failed after start request")
+
+    def remove(name):
+        raise OSError("cleanup unavailable")
+
+    docker.start = start
+    sandbox._remove = remove
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "blocked"
+    assert outcome["sandbox"]["execution_may_have_started"]
+    assert outcome["sandbox"]["cleanup"] == "unconfirmed"
+    assert "cleanup unavailable" in outcome["sandbox"]["cleanup_error"]
+    timings = outcome["sandbox"]["timings_s"]
+    assert set(timings) == {"preflight", "create_inspect", "execution", "cleanup"}
+    assert all(value >= 0 for value in timings.values())
+
+
+@pytest.mark.parametrize("status", ["running", "paused", "created", "restarting", "unknown"])
+def test_sweep_skips_nonterminal_containers(settings, status):
+    sandbox, docker = make(settings)
+    docker.inspect_override = container_inspect(settings, "a" * 16)
+    docker.inspect_override["State"] = {"Status": status, "Running": status == "running"}
+    report = sandbox.sweep()
+    assert len(report["skipped"]) == 2
+    assert not report["swept"]
+    assert not any(call[0] == "rm" for call in docker.calls)
+
+
+@pytest.mark.parametrize("change", ["image", "label", "state"])
+def test_sweep_skips_ambiguous_ownership_and_state(settings, change):
+    sandbox, docker = make(settings)
+    info = container_inspect(settings, "a" * 16)
+    if change == "image":
+        info["Image"] = "sha256:" + "e" * 64
+    elif change == "label":
+        info["Config"]["Labels"] = {}
+    else:
+        info["State"] = {"Status": "exited"}
+    docker.inspect_override = info
+    report = sandbox.sweep()
+    assert len(report["skipped"]) == 2
+    assert not any(call[0] == "rm" for call in docker.calls)
+
+
+def test_sweep_reports_unconfirmed_removal(settings):
+    sandbox, docker = make(settings)
+    docker.remove_fails = True
+    report = sandbox.sweep()
+    assert report["swept"] == []
+    assert len(report["failed"]) == 2
+
+
+def test_invalid_utf8_supervisor_output_fails_closed(settings):
+    sandbox, docker = make(settings)
+    docker.process = FakeProcess(stdout=b"\xff")
+    assert sandbox.run("verify", "x=1", "assert x")["result"]["status"] == "blocked"
+
+
+@pytest.mark.parametrize("fault", ["attach_exit", "state_inspection", "output_stream"])
+def test_host_transport_failure_cannot_accept_pass(settings, fault):
+    reported = passing_result(settings)
+    sandbox, docker = make(settings, result=reported)
+    process = FakeProcess(stdout=json.dumps(reported).encode())
+    docker.process = process
+    if fault == "attach_exit":
+        process.wait = lambda timeout: 1
+    elif fault == "state_inspection":
+        original = docker.run
+
+        def run(argv, **kwargs):
+            if "--format" in docker._args(argv) and "inspect" in docker._args(argv):
+                return fail(b"engine unavailable")
+            return original(argv, **kwargs)
+
+        docker.run = run
+    else:
+        def read(size):
+            raise OSError("broken stderr")
+
+        process.stderr.read = read
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "blocked"
+    assert outcome["result"]["reported_result"] == reported
+
+
+def test_cleanup_exception_preserves_reported_pass_as_diagnostic(settings):
+    reported = passing_result(settings)
+    sandbox, _ = make(settings, result=reported)
+
+    def remove(name):
+        raise OSError("daemon unavailable")
+
+    sandbox._remove = remove
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "blocked"
+    assert outcome["result"]["reported_result"] == reported
+    assert outcome["sandbox"]["cleanup"] == "unconfirmed"
+
+
+def test_cleanup_error_is_recorded_by_harness(settings):
+    from jovin_harness.receipts import ReceiptStore
+    from jovin_harness.tools import Harness
+
+    sandbox, _ = make(settings, result=passing_result(settings))
+
+    def remove(name):
+        raise OSError("cleanup failed")
+
+    sandbox._remove = remove
+    store = ReceiptStore(settings.receipts_dir)
+    harness = Harness(settings=settings, sandbox=sandbox, store=store)
+    response = harness.verify_python("x=1", "assert x")
+    receipt = store.get(response["receipt_id"])
+    assert response["passed"] is False
+    assert receipt["sandbox"]["cleanup"] == "unconfirmed"
+    assert receipt["result"]["reported_result"]["status"] == "passed"
+
+
+def test_sweep_skips_newly_running_container_when_nonforce_remove_fails(settings):
+    sandbox, docker = make(settings)
+    original = docker.run
+
+    def run(argv, **kwargs):
+        if docker._args(argv)[0] == "rm":
+            assert "--force" not in docker._args(argv)
+            return fail(b"container is running")
+        return original(argv, **kwargs)
+
+    docker.run = run
+    report = sandbox.sweep()
+    assert report["swept"] == []
+    assert len(report["failed"]) == 2
+
+
+@pytest.mark.parametrize("state", [
+    {"Status": "dead", "Running": False, "ExitCode": 0, "OOMKilled": False},
+    {"Status": "exited", "Running": False, "ExitCode": 0, "OOMKilled": False, "Error": "engine error"},
+])
+def test_unclean_engine_termination_rejects_pass(settings, state):
+    reported = passing_result(settings)
+    sandbox, _ = make(settings, result=reported, state=state)
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "blocked"
+    assert outcome["result"]["reported_result"] == reported
+
+
+@pytest.mark.parametrize("phase", ["create", "wait", "cleanup"])
+def test_interruption_is_receipted_and_cleanup_attempted(settings, phase):
+    from jovin_harness.receipts import ReceiptStore
+    from jovin_harness.tools import Harness
+
+    sandbox, docker = make(settings, result=passing_result(settings))
+    original = docker.run
+    interrupted = False
+
+    def run(argv, **kwargs):
+        nonlocal interrupted
+        answer = original(argv, **kwargs)
+        if not interrupted and docker._args(argv)[0] == ("create" if phase == "create" else "rm"):
+            interrupted = True
+            raise KeyboardInterrupt()
+        return answer
+
+    if phase in ("create", "cleanup"):
+        docker.run = run
+    else:
+        process = FakeProcess(stdout=json.dumps(passing_result(settings)).encode())
+        original_wait = process.wait
+
+        def wait(timeout=None):
+            nonlocal interrupted
+            if not interrupted:
+                interrupted = True
+                raise KeyboardInterrupt()
+            return original_wait(timeout)
+
+        process.wait = wait
+        docker.process = process
+    store = ReceiptStore(settings.receipts_dir)
+    harness = Harness(settings=settings, sandbox=sandbox, store=store)
+    response = harness.verify_python("x=1", "assert x")
+    receipt = store.get(response["receipt_id"])
+    assert response["passed"] is False
+    assert receipt["result"]["interrupted"] is True
+    assert any(call[0] == "rm" for call in docker.calls)
+    assert receipt["sandbox"]["cleanup"] == ("unconfirmed" if phase == "cleanup" else "removed")
+    if phase == "wait":
+        assert docker.process.killed
+
+
+def test_system_exit_is_not_swallowed(settings):
+    sandbox, docker = make(settings)
+
+    def start(argv):
+        raise SystemExit(2)
+
+    docker.start = start
+    with pytest.raises(SystemExit):
+        sandbox.run("verify", "x=1", "assert x")
+    assert any(call[0] == "rm" for call in docker.calls)
+
+
+def test_failed_input_stream_is_closed_and_cannot_pass(settings):
+    sandbox, docker = make(settings, result=passing_result(settings))
+    process = FakeProcess(stdout=json.dumps(passing_result(settings)).encode())
+
+    def write(payload):
+        raise OSError("broken input pipe")
+
+    process.stdin.write = write
+    docker.process = process
+    outcome = sandbox.run("verify", "x=1", "assert x")
+    assert outcome["result"]["status"] == "blocked"
+    assert process.stdin_closed

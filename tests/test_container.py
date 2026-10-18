@@ -114,7 +114,7 @@ def test_output_flood_is_cut_off(sandbox):
 
 def test_no_container_is_left_behind(sandbox):
     run(sandbox, "print(1)\n")
-    assert sandbox.sweep() == []
+    assert sandbox.sweep() == {"swept": [], "skipped": [], "failed": []}
 
 
 def test_a_test_returning_a_generator_does_not_pass(sandbox):
