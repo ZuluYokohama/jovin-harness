@@ -288,6 +288,8 @@ class ReceiptStore:
             recovery.mkdir(exist_ok=True)
             token = secrets.token_hex(12)
             self._write_new(recovery / f"index-{token}.jsonl", prefix + tail)
+            _fsync_dir(recovery)
+            _fsync_dir(recovery.parent)
             partial = self.index.with_name(f"index-{token}.partial")
             try:
                 self._write_new(partial, prefix + canonical_json(_index_entry(receipt)) + b"\n")

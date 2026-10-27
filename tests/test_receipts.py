@@ -1,6 +1,5 @@
 import json
 import os
-import stat
 import threading
 from types import SimpleNamespace
 
@@ -310,36 +309,40 @@ def test_recovery_replacement_failure_keeps_index_and_backup(tmp_path, monkeypat
 
 
 @pytest.mark.skipif(os.name == "nt", reason="Windows does not support directory fsync")
-@pytest.mark.parametrize("recover", [False, True])
+@pytest.mark.parametrize("recover", [None, "new", "existing"])
 def test_replacements_sync_directory_before_appending_index(tmp_path, monkeypatch, recover):
     store = ReceiptStore(tmp_path)
+    recovery = tmp_path / "recovery"
     if recover:
         first = store.append(body(1))
         orphan = make_orphan(store, first)
         store.index.write_bytes(store.index.read_bytes() + index_line(orphan)[:30])
+        if recover == "existing":
+            recovery.mkdir()
     events = []
-    replace, fsync, append_index = receipts.os.replace, receipts.os.fsync, store._append_index
+    replace, fsync_dir, append_index = receipts.os.replace, receipts._fsync_dir, store._append_index
 
     def track_replace(source, target):
         replace(source, target)
         events.append("index replaced" if target == store.index else "receipt replaced")
 
-    def track_fsync(fd):
-        fsync(fd)
-        if stat.S_ISDIR(os.fstat(fd).st_mode):
-            events.append("directory synced")
+    def track_fsync_dir(directory):
+        fsync_dir(directory)
+        if directory == recovery:
+            assert any(path.read_bytes() == store.index.read_bytes() for path in recovery.glob("*.jsonl"))
+        events.append("recovery synced" if directory == recovery else "directory synced")
 
     def track_append(receipt):
         events.append("index append")
         append_index(receipt)
 
     monkeypatch.setattr(receipts.os, "replace", track_replace)
-    monkeypatch.setattr(receipts.os, "fsync", track_fsync)
+    monkeypatch.setattr(receipts, "_fsync_dir", track_fsync_dir)
     monkeypatch.setattr(store, "_append_index", track_append)
     store.append(body(3))
     expected = ["receipt replaced", "directory synced", "index append"]
     if recover:
-        expected = ["index replaced", "directory synced", *expected]
+        expected = ["recovery synced", "directory synced", "index replaced", "directory synced", *expected]
     assert events == expected
     assert store.verify_chain()["valid"]
 
