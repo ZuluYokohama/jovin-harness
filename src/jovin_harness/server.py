@@ -24,7 +24,7 @@ from .tools import Harness, ToolError
 
 INSTRUCTIONS = """\
 jovin-harness runs Python in a fresh, network-less, locked-down container and keeps a hash-chained receipt of
-every run. Nothing runs on the user's machine.
+every run. Submitted code never runs in the host Python interpreter.
 
 Before saying that code works, call verify_python with the code and tests that exercise it. Tests are plain
 Python: top-level asserts and/or test_* functions without arguments. They can call the code's functions
@@ -66,7 +66,8 @@ def build_server(harness: Harness) -> MCPServer:
         isolation: Annotated[Literal["process", "shared"], Field(description=(
             "process (default): tests and code run as different users in separate processes and the "
             "tests call the code's top-level functions with plain data (numbers, strings, lists, dicts, "
-            "tuples, sets, bytes), so the code cannot tamper with the verdict. shared: one process, "
+            "tuples, sets, bytes), preventing shared-interpreter mutation. See SECURITY.md for the "
+            "remaining isolation limits. shared: one process, "
             "needed for classes or objects, but code written to cheat could fake a pass."))] = "process",
     ) -> dict[str, Any]:
         """Run tests against code in a disposable sandbox and return per-test results plus a receipt.

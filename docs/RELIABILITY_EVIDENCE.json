@@ -1,0 +1,416 @@
+{
+  "format": "jovin-harness.reliability-evidence.v1",
+  "recorded_at_utc": "2026-10-14T05:17:35.369931+00:00",
+  "base_commit": "713dd0e83bcbba96a4c21225b1de338ce1ee00ab",
+  "branch": "codex/jovin-reliability",
+  "local_root": "D:\\JovinHarness_Artifacts",
+  "source_files": {
+    "src/jovin_harness/__init__.py": {
+      "sha256": "39bf41a594466f843a88da11db0bb450cc3e4880f435a143e8109485bab993fa",
+      "lf_sha256": "39bf41a594466f843a88da11db0bb450cc3e4880f435a143e8109485bab993fa"
+    },
+    "src/jovin_harness/__main__.py": {
+      "sha256": "13a1a5b340cdcfc1902b62be90e508c7c71886000d5bf087e7854aadf09fb35e",
+      "lf_sha256": "13a1a5b340cdcfc1902b62be90e508c7c71886000d5bf087e7854aadf09fb35e"
+    },
+    "src/jovin_harness/cli.py": {
+      "sha256": "5c46e466b4ea472ca5261b76e084af66e0584399ef1b93115bec977ef00a6a5d",
+      "lf_sha256": "18f2759d7ba45e4143d40edbad40d4a1affe4572044abbb6487253da8af7f0b8"
+    },
+    "src/jovin_harness/config.py": {
+      "sha256": "96914d84bda744c7b5586699cba68288278e8056c150408a4207484dee009e56",
+      "lf_sha256": "96914d84bda744c7b5586699cba68288278e8056c150408a4207484dee009e56"
+    },
+    "src/jovin_harness/receipts.py": {
+      "sha256": "7805ad32ef2e582e460268e6fba3b45e2f0808b73657a396b8fbea329252d2e8",
+      "lf_sha256": "7805ad32ef2e582e460268e6fba3b45e2f0808b73657a396b8fbea329252d2e8"
+    },
+    "src/jovin_harness/sandbox.py": {
+      "sha256": "c48e3cc0ab2e0a5d8f56721df79bd4a99410bd93458d3dbcc0b9ad0869603018",
+      "lf_sha256": "b6725cbd8e783dc50f6ee4373f4c0d25002b0182d28dfa261faaa0c91d6fec1c"
+    },
+    "src/jovin_harness/sandbox_image/Dockerfile": {
+      "sha256": "cc11969cb0319aedc5c2b3a0ebd68db8daa18124ff2926ca1faec8533bda517e",
+      "lf_sha256": "cc11969cb0319aedc5c2b3a0ebd68db8daa18124ff2926ca1faec8533bda517e"
+    },
+    "src/jovin_harness/sandbox_image/runner.py": {
+      "sha256": "8a847c3e8ac4d31afd86fe9b415e077d4be2ef3ede7cbf28696b6010f58ddfb2",
+      "lf_sha256": "c7b1c44d60c5d30ab902cb0a96287d6dc45853e5c6e00c9ac61ed2e0be7bdb0b"
+    },
+    "src/jovin_harness/server.py": {
+      "sha256": "4f7ab2e100bea8c53047bb7740a0963c52e4156cad28ef686645de071bfff170",
+      "lf_sha256": "4f7ab2e100bea8c53047bb7740a0963c52e4156cad28ef686645de071bfff170"
+    },
+    "src/jovin_harness/tools.py": {
+      "sha256": "1496fd25735155513717adb471f6a2b0654a32a82b2cc390fac1d9ad188fafe0",
+      "lf_sha256": "1496fd25735155513717adb471f6a2b0654a32a82b2cc390fac1d9ad188fafe0"
+    },
+    "tests/conftest.py": {
+      "sha256": "72624ff2ddc290832cac332cac331a603c1be99c40d6227a59fe951c0806995e",
+      "lf_sha256": "72624ff2ddc290832cac332cac331a603c1be99c40d6227a59fe951c0806995e"
+    },
+    "tests/fake_docker.py": {
+      "sha256": "5784b65a2487b0f60d0f800f19126a7986a6d2f75d64f80fa234dd92489681c5",
+      "lf_sha256": "be84aaf55e48a203782a40470b3672e88b2058cc7ab4beba13f41dfb38194eb7"
+    },
+    "tests/test_cli.py": {
+      "sha256": "933e142f00e2feee1d938962292aac4d7788e75983d8b4d4ca5f425fb964fdea",
+      "lf_sha256": "2e5b22a27c11b5b57a6d858f4fe701075080ac9a02d04c124411943a48bc5a41"
+    },
+    "tests/test_config.py": {
+      "sha256": "4b4c5c7ee47d3d12c4d104427f0a8971f6fdfc51fb9a98164fc3fcd5677e432d",
+      "lf_sha256": "4b4c5c7ee47d3d12c4d104427f0a8971f6fdfc51fb9a98164fc3fcd5677e432d"
+    },
+    "tests/test_container.py": {
+      "sha256": "a59b27744fdd8669d95e300dac0b9493206795690f26237b4da6d990d3d9e494",
+      "lf_sha256": "5605cfd055db84c6b78a897c784392a97924119096ad3253fe7f59ecd75ebbaa"
+    },
+    "tests/test_container_isolation.py": {
+      "sha256": "f81c6a3721ad46154a0d062cdc5e30db7ade76d24b96305bee15ecfaa957500f",
+      "lf_sha256": "bcb2823186fe49ffca574fbfde8306d3b722de0fae4e1d6a5d13c66c7be696c7"
+    },
+    "tests/test_proxies.py": {
+      "sha256": "f76cde2b5c1be9976ed552ed36bf2efe9a1529a1c5cefbbd9ebb5bf20d40d967",
+      "lf_sha256": "6cbea8fd5135f681c02876c4214734cd268288657457475dc5c5c44056f4baff"
+    },
+    "tests/test_receipts.py": {
+      "sha256": "c405d6ab3b17b88422c2016ff0f2bdfb34077122cc9537083a86a5e7d5c2dece",
+      "lf_sha256": "93549b2d58df7acaad7e0d31713faa71aeb1fe69ff1e8154e72fda20f01798d6"
+    },
+    "tests/test_runner_logic.py": {
+      "sha256": "5f88562a687be1033b31425bf21cfd9c403b1c3d3050c968e614bbfa439eb443",
+      "lf_sha256": "5f88562a687be1033b31425bf21cfd9c403b1c3d3050c968e614bbfa439eb443"
+    },
+    "tests/test_sandbox.py": {
+      "sha256": "8aeaad89b56d801a27d0ba419a8756e82c22b42df32877d8e21039cfeed9e78f",
+      "lf_sha256": "08b556eb1f0e9df57dd6d902e9aaf27706214a62d99618d69369900ef41aebe5"
+    },
+    "tests/test_server.py": {
+      "sha256": "7ccd6b6d1841448a054904a1e227ac4227cf7feda6bd7c81d7c6eb4a54c91f29",
+      "lf_sha256": "7ccd6b6d1841448a054904a1e227ac4227cf7feda6bd7c81d7c6eb4a54c91f29"
+    },
+    "tests/test_tools.py": {
+      "sha256": "92ea7820ab1a979c3d4d2be949a38aaee0bc80bf1c3b0303aed4156d4eecb1d9",
+      "lf_sha256": "5d797b4e01089ce5af3976f7749998b97fff6210dc3f22c5fc72c6bec8c49887"
+    },
+    "tools/benchmark_receipts.py": {
+      "sha256": "b276c593ce1bb7aeed34a0a56afa7e9501132d38ccbeea4d54d3666af7926783",
+      "lf_sha256": "c69383810546dd57f331d7dfc3c4e861f36d6364b6affe5354634baddfbaeff8"
+    },
+    "tools/benchmark_sandbox.py": {
+      "sha256": "1fea5eb8ebb5bec12add930000cb08f057464a4f69fd66a976e8141db468d0f7",
+      "lf_sha256": "1fea5eb8ebb5bec12add930000cb08f057464a4f69fd66a976e8141db468d0f7"
+    }
+  },
+  "source_hash_note": "Byte hashes pin the evaluated Windows checkout; lf_sha256 normalizes only CRLF for comparison to Git blobs. Documentation and this manifest are outside the executable-source fingerprint.",
+  "source_lf_fingerprint": "00f64e3090fbaa4be771d22df13df3f9ae5e11b0d8c22f5ff1932264b8804f87",
+  "runtime": {
+    "backend": "wsl:JovinHarness",
+    "windows_python": "3.12.10",
+    "linux_python": "3.12.3",
+    "wsl": "2.7.3",
+    "linux_kernel": "6.6.114.1",
+    "ubuntu": "24.04.5",
+    "engine": {
+      "server_version": "29.9.0",
+      "engine_id": "e95ecb10-fdc8-4759-b4ba-7b8238391773",
+      "os_type": "linux",
+      "cgroup_version": "2",
+      "security_options": [
+        "name=seccomp,profile=builtin",
+        "name=cgroupns"
+      ],
+      "docker_host": null,
+      "docker_host_local": true
+    },
+    "image": {
+      "id": "sha256:c6ecb3c2dd0a63a8612371f06cd1a4c110ea5fd46ea7825f51174b3a6393fab4",
+      "runner_sha256": "8a847c3e8ac4d31afd86fe9b415e077d4be2ef3ede7cbf28696b6010f58ddfb2",
+      "harness_version": "0.2.0.dev0",
+      "architecture": "amd64"
+    },
+    "limits": {
+      "timeout_s": 10,
+      "memory_bytes": 536870912,
+      "pids": 64,
+      "cpus": 1.0,
+      "tmpfs_bytes": 16777216,
+      "nofile": 64,
+      "fsize_bytes": 16777216,
+      "max_input_bytes": 262144,
+      "max_output_bytes": 65536
+    }
+  },
+  "validation": [
+    {
+      "command": "python -m pytest -q",
+      "environment": "Windows isolated development Python",
+      "passed": 234,
+      "skipped": 36,
+      "evidence": "final-windows-2.txt"
+    },
+    {
+      "command": "python -m pytest -q",
+      "environment": "JovinHarness /opt/jovin-venv/bin/python",
+      "passed": 233,
+      "skipped": 37,
+      "evidence": "final-linux-2.txt"
+    },
+    {
+      "command": "python -m pytest -q -m container",
+      "environment": "Windows development Python, wsl:JovinHarness",
+      "passed": 36,
+      "deselected": 234,
+      "skipped": 0,
+      "evidence": "container-check-2.txt"
+    },
+    {
+      "command": "python -m ruff check .",
+      "passed": true,
+      "evidence": "final-ruff-2.txt"
+    },
+    {
+      "command": "python -m build --outdir D:\\JovinHarness_Artifacts\\downloads\\final-dist",
+      "passed": true,
+      "evidence": "final-package-build.txt"
+    },
+    {
+      "command": "D:\\JovinHarness_Artifacts\\environments\\wheel-check\\Scripts\\python.exe D:\\JovinHarness_Artifacts\\evidence\\installed_smoke_2.py",
+      "passed": true,
+      "evidence": "installed-smoke-2.json"
+    },
+    {
+      "command": "python tools/benchmark_sandbox.py --output D:\\JovinHarness_Artifacts\\evidence\\sandbox-benchmark-001.json --repeats 5",
+      "passed": true,
+      "evidence": "sandbox-benchmark-001.json"
+    },
+    {
+      "command": "wsl --distribution JovinHarness --exec docker ps -a --format {{json .}}",
+      "passed": true,
+      "remaining_containers": 0,
+      "evidence": "final-cleanup.json"
+    }
+  ],
+  "package_artifacts": {
+    "jovin_harness-0.2.0.dev0-py3-none-any.whl": {
+      "sha256": "c85866f4965101cd2ea0cfb5acac96c93fa7d4632486d8a4c7e4b53dec1ed61d",
+      "bytes": 45024
+    },
+    "jovin_harness-0.2.0.dev0.tar.gz": {
+      "sha256": "ac90a815e4b7990738ee8feb644e3f18fa3935c8c4aa4451113d1e479062f416",
+      "bytes": 74268
+    }
+  },
+  "package_note": "Wheel modules match evaluated source (package-content-check.json). The setup/results guide and evidence manifest were added after packaging; no executable code changed.",
+  "retained_evidence": {
+    "baseline-ci-annotations.json": {
+      "sha256": "4538adc2673eda50aa35b3956b1270ab44cb2cd9e71d125335b933b699f487fc",
+      "bytes": 1030
+    },
+    "baseline-pytest.txt": {
+      "sha256": "564efc41d3f11bc3a7515f72e4ed0a30cebebcad3a56d95fd581aa12260479f7",
+      "bytes": 276
+    },
+    "benchmarks/baseline-001.json": {
+      "sha256": "dd7b67f0aef905bca077ea2a9ece1a5ef49249d06f63ad7723f17955cf34b7c7",
+      "bytes": 418790
+    },
+    "benchmarks/comparison-001.json": {
+      "sha256": "dd77ff1e43b388c5de27805d01ee09d6c8e15cb33df0cbae8370e83d1936d58b",
+      "bytes": 9025
+    },
+    "benchmarks/updated-001.json": {
+      "sha256": "f41e48eeff0285d259795a0cf74b635fe4daf197ae91cecca73cd8f5788795bf",
+      "bytes": 418481
+    },
+    "container-check-1.txt": {
+      "sha256": "c99b2ccd36bcc93b05bcc32b7aa50fd4066688b12a2a0041c219db91bc58945d",
+      "bytes": 1728
+    },
+    "container-check-1.xml": {
+      "sha256": "76f9bf7abb7c7e6ca749742ba7ccdca6cbb4ce6ac4f6c4c02aa0dcee83ce0112",
+      "bytes": 5775
+    },
+    "container-check-2.txt": {
+      "sha256": "1c7cbda5b7a226864b150b903a143f13fe85ac5d8c1d9df63683648db23633c3",
+      "bytes": 128
+    },
+    "container-check-2.xml": {
+      "sha256": "f5f1f37f46e82571c77549e475b4a60b2761da710c39e4e10f5afe85070b72e2",
+      "bytes": 4310
+    },
+    "docker-install.txt": {
+      "sha256": "832083789c5f4f02a1c500838b173c90b09ab435c148e983a3018aca5e14a4c0",
+      "bytes": 30731
+    },
+    "doctor.txt": {
+      "sha256": "52408b5629b1dd2649498ed8820582fff2dec60209d7bb0f52797ab3d20835be",
+      "bytes": 1381
+    },
+    "final-cleanup.json": {
+      "sha256": "9e9778877b3432abe703b75e6e5e0312fddac9ee1c9b17d355bc91b90b610779",
+      "bytes": 244
+    },
+    "final-linux-1.txt": {
+      "sha256": "736fc85b161e6167b52e2a7d2bb0201f45cc14207056e3899737ebbb8e67ebaf",
+      "bytes": 1904
+    },
+    "final-linux-1.xml": {
+      "sha256": "f02a42a0fd573730ea57310afff597e002f9e053d55b970bb5d78b50741555c1",
+      "bytes": 40909
+    },
+    "final-linux-2.txt": {
+      "sha256": "e8187a8e69945afd21557b92bae40463a1b14c7cda8bcc761b6d12add25d26fb",
+      "bytes": 357
+    },
+    "final-linux-2.xml": {
+      "sha256": "9138c7452100ee1a68fab60164894a5f4577ee59732d93b1363b49d22391920f",
+      "bytes": 39493
+    },
+    "final-package-build.txt": {
+      "sha256": "15201c340444a259a1bdef0ae132fd6f0fac18fd4627d06bb819471edf35bc30",
+      "bytes": 611
+    },
+    "final-ruff-1.txt": {
+      "sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "bytes": 20
+    },
+    "final-ruff-2.txt": {
+      "sha256": "a4443afdcfb6d7363adb285762515ccf7cf50473b1a05c20c1a50f6bed4d26b0",
+      "bytes": 20
+    },
+    "final-windows-1.txt": {
+      "sha256": "0fa36b2c00c841b3a082c24ab3cb35f76adc219169be969f1f59d7cb1d489a27",
+      "bytes": 357
+    },
+    "final-windows-1.xml": {
+      "sha256": "d06e8eafa49911a13564fa9423e949cf32f1d9cefbcccf8ea2877aae600c54c5",
+      "bytes": 39175
+    },
+    "final-windows-2.txt": {
+      "sha256": "5bc5d5e96a3580e2171ce57908940a9d245378979498e87728fb97d4a9beb8fe",
+      "bytes": 357
+    },
+    "final-windows-2.xml": {
+      "sha256": "74ca5fa2ad5fa6cb00be7117c8009db1777846dee21580008632e1136ddccc25",
+      "bytes": 39175
+    },
+    "image-build.txt": {
+      "sha256": "3aadf0c14f397764bf2439adef98278940f0a60e46fa3e0f291f803282bcd963",
+      "bytes": 174
+    },
+    "installed-smoke-2.json": {
+      "sha256": "e5f61f51fd84e11f959672b4b7870889b075c09333bcba02c2e50658708e88aa",
+      "bytes": 8434
+    },
+    "installed-smoke-log.txt": {
+      "sha256": "a54ab3441cd73a18efb5de78c3eab5899a2c13ce67f96ba0efdb97fbfcba9a65",
+      "bytes": 2172
+    },
+    "installed-smoke.json": {
+      "sha256": "45cc95c79ff06efa28cb82816fe6551646bf706b21f07c43627079474c8fd0e6",
+      "bytes": 10578
+    },
+    "installed_smoke.py": {
+      "sha256": "d69bb9620a7f976add033fafafc5021cda8ab48590ef65f7cd0d328a9efd2ed2",
+      "bytes": 3501
+    },
+    "installed_smoke_2.py": {
+      "sha256": "473b989f70297669e3bcff36e6bd72ff2dfa8122d2353482a4a833684e45192e",
+      "bytes": 3505
+    },
+    "linux-dependencies.txt": {
+      "sha256": "84b0ff4df9ee656620fc4fab9d4cbd22cd71457ce09f46502dbc9ddd4502c436",
+      "bytes": 782
+    },
+    "linux-python-install.txt": {
+      "sha256": "2e3904a4261d879e5be06724cb174ed4cb103f80f425eb0e60e7e622faaf05ae",
+      "bytes": 13923
+    },
+    "package-build-candidate.txt": {
+      "sha256": "15201c340444a259a1bdef0ae132fd6f0fac18fd4627d06bb819471edf35bc30",
+      "bytes": 611
+    },
+    "package-content-check.json": {
+      "sha256": "b0153749d7f43b6e735f0fabd81312cab4f5e3739ac82d0d28ad5f0b72900cfd",
+      "bytes": 251
+    },
+    "parser-baseline-proof-001.json": {
+      "sha256": "278e120901403975de147a49eb49aa80a921a43b46220ad3ba55ca0d00916025",
+      "bytes": 5534
+    },
+    "parser-diagnostic-001.json": {
+      "sha256": "4047241c70018712686900c166ab1ac7f1b9dd3d8eac116822a72164f66a5f4e",
+      "bytes": 738
+    },
+    "parser-fixed-proof-001.json": {
+      "sha256": "1821eb1819b313e676b886c00ede106a6e9d21b30bbc7cd2e34d518adb2d562a",
+      "bytes": 6073
+    },
+    "sandbox-benchmark-001.json": {
+      "sha256": "1384998d6cd0ced24c3a7f1a69f6ba2f03cc8063795458b3495e96ebe487614a",
+      "bytes": 14514
+    },
+    "wheel-check-dependencies.txt": {
+      "sha256": "2600aa7604bec8cd64b608ee1124a2959abd17b7948a65f890174aedee89426d",
+      "bytes": 734
+    },
+    "wheel-check-install.txt": {
+      "sha256": "c1c6617507e8b7c27cf47707e820334217831068d4bb094b8eb9985d75a6491c",
+      "bytes": 10851
+    },
+    "windows-dependencies.txt": {
+      "sha256": "8696dbcc353e5b92602cd1d821ae5c9da229dd11e0c770449c0beb92a0dd5211",
+      "bytes": 851
+    },
+    "wsl-before.txt": {
+      "sha256": "27beb086f1596d3e4ba7ac2b43a73aca348bf080ec50f3e9023a32d4246cef8d",
+      "bytes": 88
+    },
+    "wsl-first-boot.txt": {
+      "sha256": "49784ce2edbf0c4730dbc18d6b35c5333471517eb9db8a6b15f3aa34554db6a1",
+      "bytes": 457
+    },
+    "wsl-install-exit.txt": {
+      "sha256": "13bf7b3039c63bf5a50491fa3cfd8eb4e699d1ba1436315aef9cbe5711530354",
+      "bytes": 3
+    },
+    "wsl-install.txt": {
+      "sha256": "6bfbb2bb821ce0cb20027da943bc1de5ff25ad5a9bb7f34c3586af494b78632c",
+      "bytes": 156
+    },
+    "source-and-fixture-hashes.json": {
+      "sha256": "d7a0d6d8f9ca4636900d03d23826ad84eec42f4c4c0df626c94e677389721b96",
+      "bytes": 53157338
+    },
+    "ci-285a520-jobs.json": {
+      "sha256": "07e8519299f0674c8d26f43622b6fe6801f53508d645a3f6aca11ba536aed656",
+      "bytes": 14594
+    },
+    "ci-285a520-log.txt": {
+      "sha256": "51a6abdc60f837ba6c47e9df56b6e641de5517c668f02543f03f64a1725ac692",
+      "bytes": 258926
+    }
+  },
+  "acceptance": {
+    "functional": true,
+    "real_container": true,
+    "local_only": false,
+    "github_ci": {
+      "source_commit": "285a52085c066050e04e26b648e0ad3a022ce136",
+      "run_url": "https://github.com/ZuluYokohama/jovin-harness/actions/runs/38515995852",
+      "jobs_passed": 6,
+      "baseline_failure_retained": "baseline-ci-annotations.json",
+      "account_settings_changed": false
+    },
+    "performance_speedup_established": false
+  },
+  "limitations": [
+    "Unsigned receipts are not authentication or an external anchor.",
+    "Benchmark background load/cache state were not controlled.",
+    "Local Python 3.12 checks do not establish the entire GitHub OS/Python matrix.",
+    "Reviews were bounded source reviews, not an external security certification.",
+    "Earlier failures and diagnostic false-pass baseline receipts remain retained."
+  ],
+  "fixture_manifest_note": "The separate local source-and-fixture-hashes.json retains individual hashes for the 242,665 original evidence/fixture files. This public summary indexes reports instead of embedding every synthetic receipt."
+}

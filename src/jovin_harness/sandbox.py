@@ -10,11 +10,13 @@ from __future__ import annotations
 import io
 import json
 import os
+import re
 import secrets
 import struct
 import subprocess
 import tarfile
 import threading
+import time
 from dataclasses import dataclass
 from importlib import resources
 from typing import Protocol
@@ -241,6 +243,7 @@ class Sandbox:
             raise ValueError("mode must be verify or run")
         if isolation not in ("process", "shared"):
             raise ValueError("isolation must be process or shared")
+        began = time.monotonic()
         expected_isolation = isolation if mode == "verify" else "none"
         self.check_inputs(code=code, tests=tests, stdin=stdin)
         limits = self.settings.limits
@@ -257,11 +260,19 @@ class Sandbox:
                    "limits": {**limits.as_dict(), "timeout_s": timeout_s}, "run_id": run_id,
                    "inspect_verified": False, "kernel_verified": False, "cleanup": "not_created"}
 
-        created = self.executor.run(self.cli(*self.create_args(name, run_id)), timeout=60)
-        if created.returncode != 0:
-            raise SandboxUnavailable(f"could not create the sandbox container: {_tail(created.stderr)}")
-        sandbox["cleanup"] = "pending"
+        timings = {"preflight": time.monotonic() - began, "create_inspect": 0.0,
+                   "execution": 0.0, "cleanup": 0.0}
+        sandbox["timings_s"] = timings
+        sandbox["execution_may_have_started"] = False
+        result = {"format": RESULT_FORMAT, "status": "blocked", "reason": "container creation did not finish"}
+        created_ok = False
+        phase, phase_start = "create_inspect", time.monotonic()
         try:
+            created = self.executor.run(self.cli(*self.create_args(name, run_id)), timeout=60)
+            if created.returncode != 0:
+                raise SandboxUnavailable(f"could not create the sandbox container: {_tail(created.stderr)}")
+            created_ok = True
+            sandbox["cleanup"] = "pending"
             problems = self.validate_container(self._json("container", "inspect", name)[0], run_id)
             if problems:
                 result = {"format": RESULT_FORMAT, "status": "blocked",
@@ -269,40 +280,105 @@ class Sandbox:
                           "problems": problems}
             else:
                 sandbox["inspect_verified"] = True
+                timings[phase] = time.monotonic() - phase_start
+                phase, phase_start = "execution", time.monotonic()
+                sandbox["execution_may_have_started"] = True
                 result = self._start(name, payload, timeout_s)
                 reported = result.get("isolation")
                 if (reported is not None or result.get("status") in ("passed", "completed")) \
                         and reported != expected_isolation:
-                    result = {**result, "status": "blocked",
-                              "reason": "the sandbox reported a different isolation mode than requested"}
+                    result = self._blocked(result, "the sandbox reported a different isolation mode than requested")
                 kernel = result.get("kernel") or {}
                 sandbox["kernel_verified"] = (kernel.get("memory_max") == str(limits.memory_bytes)
                                               and kernel.get("pids_max") == str(limits.pids))
+        except KeyboardInterrupt:
+            sandbox["interrupted"] = True
+            result = {**self._blocked(result, "sandbox lifecycle interrupted"), "interrupted": True}
+        except Exception as error:  # Lifecycle failures must still reach the receipt writer.
+            result = self._blocked(result, f"sandbox lifecycle error: {type(error).__name__}: {error}")
         finally:
-            sandbox["cleanup"] = self._remove(name)
+            timings[phase] = time.monotonic() - phase_start
+            cleanup_start = time.monotonic()
+            try:
+                sandbox["cleanup"] = self._remove(name) if created_ok else self._remove_uncertain(name, run_id)
+            except KeyboardInterrupt:
+                sandbox["cleanup"] = "unconfirmed"
+                sandbox["interrupted"] = True
+                sandbox["cleanup_error"] = "KeyboardInterrupt during cleanup"
+                result = {**self._blocked(result, "sandbox cleanup interrupted"), "interrupted": True}
+            except Exception as error:
+                sandbox["cleanup"] = "unconfirmed"
+                sandbox["cleanup_error"] = f"{type(error).__name__}: {error}"
+            timings["cleanup"] = time.monotonic() - cleanup_start
         if result.get("status") in ("passed", "completed"):
             if not sandbox["kernel_verified"]:
-                result = {**result, "status": "blocked",
-                          "reason": "the kernel did not confirm the container's memory and PID limits"}
+                result = self._blocked(result, "the kernel did not confirm the container's memory and PID limits")
             elif sandbox["cleanup"] != "removed":
-                result = {**result, "status": "blocked", "reason": "the container could not be confirmed removed"}
+                result = self._blocked(result, "the container could not be confirmed removed")
         return {"result": result, "sandbox": sandbox}
+
+    @staticmethod
+    def _blocked(result: dict, reason: str) -> dict:
+        return {"format": RESULT_FORMAT, "status": "blocked", "reason": reason,
+                "reported_result": result}
+
+    def _remove_uncertain(self, name: str, run_id: str) -> str:
+        inspected = self.executor.run(self.cli("container", "inspect", name), timeout=60)
+        if self._missing(inspected):
+            return "not_created"
+        if inspected.returncode != 0:
+            return "unconfirmed"
+        info = json.loads(inspected.stdout)[0]
+        if (info.get("Image") != self.settings.image
+                or (info.get("Config", {}).get("Labels") or {}).get(RUN_LABEL) != run_id):
+            return "unconfirmed"
+        return self._remove(name)
 
     def _start(self, name: str, payload: bytes, timeout_s: int) -> dict:
         process = self.executor.start(self.cli("start", "--attach", "--interactive", name))
+        result = {"format": RESULT_FORMAT, "status": "blocked", "reason": "attach did not finish"}
+        try:
+            result = self._attached(process, name, payload, timeout_s)
+        except KeyboardInterrupt:
+            result = {**self._blocked(result, "sandbox attach interrupted"), "interrupted": True}
+        finally:
+            # Reap our CLI even if interruption happens outside the normal wait path.
+            try:
+                if process.poll() is None:
+                    process.kill()
+                process.wait(timeout=30)
+            except (Exception, KeyboardInterrupt) as error:
+                result = {**self._blocked(result, f"attach cleanup failed: {type(error).__name__}: {error}"),
+                          "interrupted": isinstance(error, KeyboardInterrupt) or bool(result.get("interrupted"))}
+        return result
+
+    def _attached(self, process, name: str, payload: bytes, timeout_s: int) -> dict:
         stdout, stderr = bytearray(), bytearray()
+        stream_errors = []
 
         def pump(stream, sink, limit):
-            while chunk := stream.read(65536):
-                if len(sink) < limit:
-                    sink.extend(chunk[: limit - len(sink)])
+            try:
+                while chunk := stream.read(65536):
+                    if len(sink) < limit:
+                        sink.extend(chunk[: limit - len(sink)])
+            except (OSError, ValueError) as error:
+                stream_errors.append(f"output stream: {type(error).__name__}: {error}")
+            finally:
+                try:
+                    stream.close()
+                except (OSError, ValueError) as error:
+                    stream_errors.append(f"output close: {type(error).__name__}: {error}")
 
         def feed():
             try:
                 process.stdin.write(struct.pack(">Q", len(payload)) + payload)
-                process.stdin.close()
-            except OSError:
-                pass
+            except (OSError, ValueError) as error:
+                stream_errors.append(f"input stream: {type(error).__name__}: {error}")
+            finally:
+                try:
+                    process.stdin.close()
+                except (OSError, ValueError) as error:
+                    stream_errors.append(f"input close: {type(error).__name__}: {error}")
 
         threads = [threading.Thread(target=pump, args=(process.stdout, stdout, MAX_RESULT_BYTES), daemon=True),
                    threading.Thread(target=pump, args=(process.stderr, stderr, MAX_STDERR_BYTES), daemon=True),
@@ -310,16 +386,27 @@ class Sandbox:
         for thread in threads:
             thread.start()
         host_timeout = False
+        interrupted = False
+        attach_exit = None
+        lifecycle_errors = []
         try:
-            process.wait(timeout=timeout_s + STARTUP_GRACE_S)
-        except subprocess.TimeoutExpired:
-            host_timeout = True
+            attach_exit = process.wait(timeout=timeout_s + STARTUP_GRACE_S)
+        except (Exception, KeyboardInterrupt) as error:
+            interrupted = isinstance(error, KeyboardInterrupt)
+            host_timeout = isinstance(error, subprocess.TimeoutExpired)
+            if not host_timeout:
+                lifecycle_errors.append(f"attach wait: {type(error).__name__}: {error}")
             try:
                 self.executor.run(self.cli("kill", name), timeout=30)
-            except SandboxUnavailable:
-                pass  # removal in run() still force-removes the container
-            process.kill()
-            process.wait(timeout=30)
+            except (Exception, KeyboardInterrupt) as error:
+                interrupted = interrupted or isinstance(error, KeyboardInterrupt)
+                lifecycle_errors.append(f"container kill: {type(error).__name__}: {error}")
+            try:
+                process.kill()
+                attach_exit = process.wait(timeout=30)
+            except (Exception, KeyboardInterrupt) as error:
+                interrupted = interrupted or isinstance(error, KeyboardInterrupt)
+                lifecycle_errors.append(f"attach cleanup: {type(error).__name__}: {error}")
         for thread in threads:
             thread.join(timeout=5)
 
@@ -329,19 +416,42 @@ class Sandbox:
                 self.cli("container", "inspect", "--format", "{{json .State}}", name), timeout=60)
             if with_state.returncode == 0:
                 state = json.loads(with_state.stdout)
-        except (SandboxUnavailable, json.JSONDecodeError):
+        except Exception as error:
+            lifecycle_errors.append(f"terminal state: {type(error).__name__}: {error}")
+            state = {}
+        if not isinstance(state, dict):
             state = {}
         result = self._parse_result(bytes(stdout))
-        if result is not None:
-            return result
-        if state.get("OOMKilled"):
+        terminal = (state.get("Status") == "exited" and state.get("Running") is False
+                    and type(state.get("ExitCode")) is int and type(state.get("OOMKilled")) is bool
+                    and state.get("Error") in (None, ""))
+        if interrupted:
+            status, reason = "blocked", "sandbox execution interrupted"
+        elif host_timeout:
+            status, reason = "timeout", "the sandbox exceeded the host deadline"
+        elif state.get("OOMKilled") is True:
             status, reason = "memory_limit", "the sandbox ran out of memory"
-        elif host_timeout or state.get("ExitCode") == 124:
+        elif state.get("ExitCode") == 124:
             status, reason = "timeout", "the sandbox did not finish in time"
+        elif not terminal:
+            status, reason = "blocked", "the container terminal state could not be confirmed"
+        elif state["ExitCode"] != 0 or attach_exit != 0:
+            status, reason = "blocked", "the supervisor or attach process exited abnormally"
+        elif lifecycle_errors or stream_errors or any(thread.is_alive() for thread in threads):
+            status, reason = "blocked", "the attach lifecycle or streams did not finish cleanly"
+        elif result is not None:
+            return result
         else:
             status, reason = "blocked", f"the sandbox produced no result: {_tail(bytes(stderr))}"
-        return {"format": RESULT_FORMAT, "status": status, "reason": reason, "timed_out": status == "timeout",
-                "exit_code": state.get("ExitCode")}
+        failure = {"format": RESULT_FORMAT, "status": status, "reason": reason,
+                   "timed_out": status == "timeout", "interrupted": interrupted,
+                   "exit_code": state.get("ExitCode"),
+                   "host_observation": {"state": state, "attach_exit_code": attach_exit,
+                                        "host_timeout": host_timeout,
+                                        "errors": lifecycle_errors + stream_errors}}
+        if result is not None:
+            failure["reported_result"] = result
+        return failure
 
     @staticmethod
     def _parse_result(stdout: bytes) -> dict | None:
@@ -350,7 +460,7 @@ class Sandbox:
             return None
         try:
             result = json.loads(lines[0])
-        except json.JSONDecodeError:
+        except (json.JSONDecodeError, UnicodeDecodeError):
             return None
         if not isinstance(result, dict) or result.get("format") != RESULT_FORMAT:
             return None
@@ -364,20 +474,44 @@ class Sandbox:
         except SandboxUnavailable:
             return "unconfirmed"
         # Any other inspect failure (daemon unreachable, permissions) proves nothing about removal.
-        missing = gone.returncode != 0 and b"no such" in gone.stderr.lower()
+        missing = self._missing(gone)
         return "removed" if missing else "unconfirmed"
 
     # -- maintenance -------------------------------------------------------------------------
 
-    def sweep(self) -> list[str]:
-        """Force-remove containers left behind by earlier runs (for example after a crash)."""
-        listed = self.executor.run(self.cli("ps", "--all", "--quiet", "--filter", f"label={RUN_LABEL}"), timeout=60)
+    def sweep(self) -> dict:
+        """Remove only identifiable stopped leftovers; never force-remove active containers."""
+        listed = self.executor.run(
+            self.cli("ps", "--all", "--quiet", "--no-trunc", "--filter", f"label={RUN_LABEL}"), timeout=60)
         if listed.returncode != 0:
             raise SandboxUnavailable(f"could not list containers: {_tail(listed.stderr)}")
-        ids = listed.stdout.decode().split()
-        for container in ids:
-            self.executor.run(self.cli("rm", "--force", container), timeout=60)
-        return ids
+        report = {"swept": [], "skipped": [], "failed": []}
+        for container in listed.stdout.decode().split():
+            try:
+                info = self._json("container", "inspect", container)[0]
+                label = (info.get("Config", {}).get("Labels") or {}).get(RUN_LABEL)
+                state = info.get("State") or {}
+                owned = (self.settings.image is not None and info.get("Image") == self.settings.image
+                         and isinstance(label, str) and re.fullmatch(r"[0-9a-f]{16}", label))
+                if not owned or state.get("Status") not in ("exited", "dead") or state.get("Running") is not False:
+                    report["skipped"].append({"id": container, "reason": "active, ambiguous, or not owned"})
+                    continue
+                # Non-force removal also refuses a container started after our inspection.
+                removed = self.executor.run(self.cli("rm", container), timeout=60)
+                gone = self.executor.run(self.cli("container", "inspect", container), timeout=60)
+                if self._missing(gone):
+                    report["swept"].append(container)
+                else:
+                    report["failed"].append({"id": container, "reason": "removal unconfirmed",
+                                             "error": _tail(removed.stderr)})
+            except Exception as error:
+                report["failed"].append({"id": container, "reason": f"{type(error).__name__}: {error}"})
+        return report
+
+    @staticmethod
+    def _missing(result: CommandResult) -> bool:
+        message = result.stderr.lower()
+        return result.returncode != 0 and (b"no such container" in message or b"no such object" in message)
 
     def build_image(self) -> str:
         files = image_files()

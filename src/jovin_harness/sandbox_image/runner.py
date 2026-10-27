@@ -311,7 +311,7 @@ def proxy(name):
                 reply = recv_frame(responses)
             except EOFError:
                 raise HarnessFailure(f"the code under test exited during a call to {name}()") from None
-            except ValueError:
+            except (ValueError, RecursionError):
                 raise HarnessFailure(f"the code under test sent a malformed reply to {name}()") from None
             if type(reply) is not dict or reply.get("id") != request_id:
                 raise HarnessFailure(f"the code under test sent a reply that does not match the call to {name}()")

@@ -3,6 +3,7 @@
 import importlib.util
 import json
 import os
+import struct
 import threading
 from pathlib import Path
 
@@ -80,6 +81,36 @@ def test_a_mismatched_reply_breaks_the_channel(side):
     reply(namespace, responses_w, {"id": 2, "ok": 5})
     with pytest.raises(namespace["HarnessFailure"], match="unusable"):
         add(2, 3)
+
+
+def test_nested_json_reply_cannot_be_swallowed_and_breaks_channel(side):
+    namespace, _, responses_w = side
+    call = namespace["proxy"]("f")
+    # This bounded depth also exceeds the C JSON recursion bound on Linux builds.
+    payload = b"[" * 20000 + b"0" + b"]" * 20000
+
+    def write_raw_reply():
+        # Bypass JSON encoding: the hostile peer sends malformed raw frame bytes.
+        frame = struct.pack(">I", len(payload)) + payload
+        while frame:
+            frame = frame[os.write(responses_w, frame):]
+
+    writer = threading.Thread(target=write_raw_reply, daemon=True)
+    writer.start()
+    try:
+        with pytest.raises(namespace["HarnessFailure"], match="malformed reply"):
+            try:
+                call()
+            except Exception:
+                pytest.fail("a response parser failure was swallowed")
+    finally:
+        writer.join(timeout=2)
+    assert not writer.is_alive()
+
+    # Even a subsequent valid reply cannot repair a poisoned channel.
+    reply(namespace, responses_w, {"id": 2, "ok": None})
+    with pytest.raises(namespace["HarnessFailure"], match="unusable"):
+        call()
 
 
 def test_raised_exceptions_cross_as_builtins(side):
