@@ -2,6 +2,10 @@
 
 ## 0.2.0 (unreleased)
 
+- Optional Ed25519 receipt signing with a signed head checkpoint (count, head hash, epoch, wall
+  time) and an optional append-only head anchor. With a verify key, `receipts verify` rejects
+  unsigned or mis-signed receipts, truncation behind the checkpoint, and rollback behind the anchor.
+  Unsigned stores and the v1 receipt format are unchanged.
 - Host termination and cleanup evidence takes precedence over passing runner output; uncertain
   creation is accounted for and swept containers must be confirmed stopped and removed.
 - Malformed nested response frames fail as harness errors and permanently close the proxy channel.

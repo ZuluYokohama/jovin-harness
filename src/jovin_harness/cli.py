@@ -59,6 +59,7 @@ def parser() -> argparse.ArgumentParser:
     receipts = commands.add_parser("receipts", help="inspect the receipt chain")
     which = receipts.add_subparsers(dest="receipts_command", required=True)
     which.add_parser("head", help="print the chain head (export it somewhere you trust)")
+    which.add_parser("checkpoint", help="print the signed head checkpoint (signed stores only)")
     check = which.add_parser("verify", help="verify one receipt, or the whole chain")
     check.add_argument("receipt_id", nargs="?")
     show = which.add_parser("show", help="print a receipt")
@@ -107,6 +108,9 @@ def main(argv: list[str] | None = None) -> int:
         if args.command == "receipts":
             if args.receipts_command == "head":
                 _print(harness.store.head())
+                return 0
+            if args.receipts_command == "checkpoint":
+                _print(harness.store.checkpoint())
                 return 0
             if args.receipts_command == "show":
                 _print(harness.get_receipt(args.receipt_id))

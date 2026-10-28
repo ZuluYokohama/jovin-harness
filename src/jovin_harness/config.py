@@ -87,6 +87,9 @@ class Settings:
     data_dir: Path
     limits: Limits = field(default_factory=Limits)
     max_concurrency: int = 2
+    signing_key: Path | None = None  # Ed25519 private key (PEM), outside data_dir; never written by the harness
+    verify_key: Path | None = None   # Ed25519 public key (PEM); defaults to the signing key's public half
+    head_anchor: Path | None = None  # append-only copy of every signed checkpoint, outside data_dir
 
     @property
     def receipts_dir(self) -> Path:
@@ -179,8 +182,30 @@ def load_settings(env: dict[str, str] | None = None) -> Settings:
     if not 1 <= concurrency <= 8:
         raise ConfigError("max_concurrency must be between 1 and 8")
 
+    signing = {}
+    for name in ("signing_key", "verify_key", "head_anchor"):
+        raw = env.get(f"JOVIN_HARNESS_{name.upper()}") or stored.get(name)
+        if raw is None:
+            continue
+        if not isinstance(raw, str) or not raw.strip():
+            raise ConfigError(f"{name} must be a file path")
+        path = Path(raw).expanduser()
+        if not path.is_absolute():
+            raise ConfigError(f"{name} must be an absolute path")
+        if name in ("signing_key", "head_anchor") and _inside(path, data_dir):
+            raise ConfigError(f"{name} must live outside the data directory, where receipts are written")
+        signing[name] = path
+
     return Settings(runtime=runtime, container_command=command, image=image, data_dir=data_dir,
-                    limits=limits, max_concurrency=concurrency)
+                    limits=limits, max_concurrency=concurrency, **signing)
+
+
+def _inside(path: Path, directory: Path) -> bool:
+    try:
+        path.resolve().relative_to(directory.resolve())
+    except ValueError:
+        return False
+    return True
 
 
 def save_pinned_image(settings: Settings, image: str) -> Path:
