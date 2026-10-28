@@ -7,6 +7,14 @@ order, so deleting, editing or reordering one breaks the chain and ``verify_chai
 A content hash is not a signature. Anyone who can write the data directory can rebuild a
 consistent chain, so export the chain head (``jovin-harness receipts head``) somewhere you trust
 if you need to detect that.
+
+Optional signing (``signing_key`` / ``verify_key`` / ``head_anchor`` in the config, see
+``signing.py``): every receipt gets an Ed25519 ``<id>.sig`` written before the receipt is
+published, and every append rewrites a signed ``head.checkpoint`` (count, head hash, epoch, wall
+time, link to the previous checkpoint). With a verify key, ``verify_chain`` rejects unsigned or
+badly signed receipts, a checkpoint that does not match the index (truncation), and, when a
+``head_anchor`` copy is configured, a checkpoint older than the anchored one (rollback). The
+receipt format and its hash are unchanged, so unsigned stores verify exactly as before.
 """
 
 from __future__ import annotations
@@ -22,11 +30,15 @@ from collections.abc import Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 
+from .signing import Verifier
+
 FORMAT = "jovin-harness.receipt.v1"
 NOTICE = ("A content hash is not a signature and a passing check is not a proof of correctness; "
           "the receipt records what ran, under which limits, and what the sandbox reported.")
 RECEIPT_ID = re.compile(r"^[0-9]{8}T[0-9]{6}Z-[0-9a-f]{12}$")
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+SIGNATURE_FORMAT = "jovin-harness.receipt-signature.v1"
+CHECKPOINT_FORMAT = "jovin-harness.head-checkpoint.v1"
 
 
 class ReceiptError(ValueError):
@@ -148,10 +160,154 @@ def _index_entry(receipt: dict) -> dict:
 
 
 class ReceiptStore:
-    def __init__(self, directory: Path):
+    def __init__(self, directory: Path, *, signer=None, verifier=None, head_anchor: Path | None = None):
         self.directory = Path(directory)
         self.index = self.directory / "index.jsonl"
         self.lock = self.directory / ".lock"
+        self.checkpoint_path = self.directory / "head.checkpoint"
+        self.signer = signer
+        if verifier is None and signer is not None:
+            verifier = Verifier(signer.public_key)
+        self.verifier = verifier
+        self.head_anchor = Path(head_anchor) if head_anchor else None
+
+    def sig_path(self, receipt_id: str) -> Path:
+        if not _matches(RECEIPT_ID, receipt_id):
+            raise ReceiptError(f"invalid receipt id {receipt_id!r}")
+        return self.directory / f"{receipt_id}.sig"
+
+    # ---------------------------------------------------------------- signatures and checkpoint
+    @staticmethod
+    def _signature_message(receipt_id: str, sha256: str, key: str) -> bytes:
+        return canonical_json({"format": SIGNATURE_FORMAT, "receipt_id": receipt_id, "sha256": sha256,
+                               "key_id": key})
+
+    def _write_signature(self, receipt: dict) -> None:
+        message = self._signature_message(receipt["id"], receipt["sha256"], self.signer.key_id)
+        record = {"format": SIGNATURE_FORMAT, "receipt_id": receipt["id"], "sha256": receipt["sha256"],
+                  "key_id": self.signer.key_id, "alg": "ed25519", "sig": self.signer.sign(message)}
+        path = self.sig_path(receipt["id"])
+        partial = path.with_name(path.name + ".partial")
+        self._write_new(partial, canonical_json(record))
+        os.replace(partial, path)
+
+    def _signature_problems(self, receipt_id: str, sha256: str) -> list[str]:
+        try:
+            raw = self.sig_path(receipt_id).read_bytes()
+        except FileNotFoundError:
+            return [f"{receipt_id}: receipt is not signed"]
+        try:
+            record = _decode_json(raw, f"signature {receipt_id}")
+        except ReceiptError as error:
+            return [f"{receipt_id}: {error}"]
+        if not isinstance(record, dict) or record.get("format") != SIGNATURE_FORMAT:
+            return [f"{receipt_id}: malformed signature record"]
+        problems = []
+        if record.get("receipt_id") != receipt_id or record.get("sha256") != sha256:
+            problems.append(f"{receipt_id}: signature covers a different receipt")
+        if record.get("key_id") != self.verifier.key_id:
+            problems.append(f"{receipt_id}: signed by an unknown key")
+        elif not self.verifier.verify(self._signature_message(receipt_id, sha256, record["key_id"]),
+                                      record.get("sig")):
+            problems.append(f"{receipt_id}: signature does not verify")
+        return problems
+
+    @staticmethod
+    def _checkpoint_body(record: dict) -> dict:
+        return {k: v for k, v in record.items() if k not in ("sha256", "sig")}
+
+    def _read_checkpoint(self, raw: bytes | None = None, label: str = "head.checkpoint"):
+        """Return (checkpoint, problems); checkpoint is None when absent or unusable."""
+        if raw is None:
+            try:
+                raw = self.checkpoint_path.read_bytes()
+            except FileNotFoundError:
+                return None, [f"{label} is missing"]
+        try:
+            record = _decode_json(raw, label)
+        except ReceiptError as error:
+            return None, [str(error)]
+        if not isinstance(record, dict) or record.get("format") != CHECKPOINT_FORMAT:
+            return None, [f"{label} is malformed"]
+        body = self._checkpoint_body(record)
+        problems = []
+        if not isinstance(record.get("epoch"), int) or isinstance(record.get("epoch"), bool) or record["epoch"] < 1:
+            problems.append(f"{label} has a malformed epoch")
+        if not isinstance(record.get("count"), int) or isinstance(record.get("count"), bool):
+            problems.append(f"{label} has a malformed count")
+        if record.get("sha256") != sha256_hex(canonical_json(body)):
+            problems.append(f"{label} sha256 does not match its contents")
+        if self.verifier is None:
+            problems.append(f"{label} cannot be checked without a verify key")
+        elif record.get("key_id") != self.verifier.key_id:
+            problems.append(f"{label} is signed by an unknown key")
+        elif not self.verifier.verify(canonical_json(body), record.get("sig")):
+            problems.append(f"{label} signature does not verify")
+        return (None if problems else record), problems
+
+    def _write_checkpoint(self, entries: list[dict]) -> dict:
+        previous = None
+        if self.checkpoint_path.exists():
+            previous, problems = self._read_checkpoint()
+            if problems:
+                raise ReceiptError("refusing to extend an invalid head checkpoint: " + "; ".join(problems))
+        body = {"format": CHECKPOINT_FORMAT, "count": len(entries),
+                "head_id": entries[-1]["id"] if entries else None,
+                "head_sha256": entries[-1]["sha256"] if entries else None,
+                "epoch": (previous["epoch"] + 1) if previous else 1,
+                "wall_time": datetime.now(UTC).isoformat(timespec="milliseconds").replace("+00:00", "Z"),
+                "prev_checkpoint_sha256": previous["sha256"] if previous else None,
+                "key_id": self.signer.key_id}
+        record = {**body, "sha256": sha256_hex(canonical_json(body)), "sig": self.signer.sign(canonical_json(body))}
+        partial = self.checkpoint_path.with_name(f"head-{secrets.token_hex(8)}.partial")
+        try:
+            self._write_new(partial, canonical_json(record))
+            os.replace(partial, self.checkpoint_path)
+        finally:
+            partial.unlink(missing_ok=True)
+        _fsync_dir(self.directory)
+        if self.head_anchor is not None:
+            self.head_anchor.parent.mkdir(parents=True, exist_ok=True)
+            with self.head_anchor.open("ab") as handle:
+                handle.write(canonical_json(record) + b"\n")
+                handle.flush()
+                os.fsync(handle.fileno())
+        return record
+
+    def checkpoint(self) -> dict | None:
+        """The signed head checkpoint as stored (None when the store is unsigned)."""
+        with self._snapshot():
+            if not self.checkpoint_path.exists():
+                return None
+            return _decode_json(self.checkpoint_path.read_bytes(), "head.checkpoint")
+
+    def _anchor_problems(self, checkpoint: dict | None) -> tuple[list[str], dict | None]:
+        if self.head_anchor is None:
+            return [], None
+        try:
+            lines = [line for line in self.head_anchor.read_bytes().splitlines() if line.strip()]
+        except FileNotFoundError:
+            return ["head anchor file is missing"], None
+        if not lines:
+            return ["head anchor file is empty"], None
+        problems, previous, latest = [], None, None
+        for number, line in enumerate(lines, 1):
+            record, bad = self._read_checkpoint(line, f"head anchor line {number}")
+            if bad:
+                problems += bad
+                continue
+            if previous is not None and (record["epoch"] != previous["epoch"] + 1
+                                         or record["prev_checkpoint_sha256"] != previous["sha256"]):
+                problems.append(f"head anchor line {number} does not extend the previous anchored checkpoint")
+            previous = latest = record
+        if latest is not None and checkpoint is not None:
+            if latest["epoch"] > checkpoint["epoch"]:
+                problems.append(f"rollback: head anchor holds epoch {latest['epoch']} (count {latest['count']}) "
+                                f"but the store's checkpoint is epoch {checkpoint['epoch']} "
+                                f"(count {checkpoint['count']})")
+            elif latest["sha256"] != checkpoint["sha256"]:
+                problems.append("store checkpoint differs from the latest anchored checkpoint")
+        return problems, latest
 
     def path_for(self, receipt_id: str) -> Path:
         if not _matches(RECEIPT_ID, receipt_id):
@@ -232,11 +388,15 @@ class ReceiptStore:
                 raise ReceiptError(f"receipt {receipt['id']} already exists")
             # Flush and publish the complete receipt before its index append starts. Recovery never
             # changes those bytes or rehashes an existing receipt.
+            if self.signer is not None:
+                self._write_signature(receipt)  # signed before it is published, so a recovered orphan is signed
             partial = path.with_name(path.name + ".partial")
             self._write_new(partial, canonical_json(receipt))
             os.replace(partial, path)
             _fsync_dir(path.parent)
             self._append_index(receipt)
+            if self.signer is not None:
+                self._write_checkpoint([*entries, _index_entry(receipt)])
             return receipt
 
     @staticmethod
@@ -342,6 +502,8 @@ class ReceiptStore:
                 if receipt.get("prev_sha256") != expected_prev:
                     problems.append("prev_sha256 does not match the preceding receipt")
                     chain = "broken"
+            if self.verifier is not None and _matches(_SHA256, receipt.get("sha256")):
+                problems += self._signature_problems(receipt_id, receipt["sha256"])
         return {"valid": not problems, "chain": chain, "problems": problems}
 
     def verify(self, receipt: dict) -> dict:
@@ -389,5 +551,36 @@ class ReceiptStore:
             for stray in sorted(on_disk - {entry["id"] for entry in entries}):
                 problems.append(f"{stray}: receipt file is not in the index")
             head = self._head(entries)
-            return {"valid": not problems, "count": head["count"], "head_sha256": head["head_sha256"],
-                    "problems": problems}
+            report = {"count": head["count"], "head_sha256": head["head_sha256"]}
+            if self.verifier is not None:
+                report.update(self._signed_chain_problems(entries, problems))
+            return {"valid": not problems, **report, "problems": problems}
+
+    def _signed_chain_problems(self, entries: list[dict], problems: list[str]) -> dict:
+        """Signatures, checkpoint-vs-index (truncation) and anchor (rollback) checks; appends to problems."""
+        for entry in entries:
+            problems += self._signature_problems(entry["id"], entry["sha256"])
+        known = {entry["id"] for entry in entries}
+        for path in sorted(self.directory.glob("*.sig")):
+            if path.stem not in known:
+                problems.append(f"{path.stem}: signature file has no indexed receipt (truncated?)")
+        checkpoint, bad = self._read_checkpoint()
+        problems += bad
+        if checkpoint is not None:
+            head = self._head(entries)
+            if checkpoint["count"] != head["count"] or checkpoint["head_sha256"] != head["head_sha256"]:
+                problems.append(f"signed checkpoint records {checkpoint['count']} receipts (head "
+                                f"{checkpoint['head_id']}) but the index has {head['count']}: truncated or rewritten")
+            elif entries:
+                try:
+                    created = self._get(entries[-1]["id"])["created_at"]
+                except ReceiptError:
+                    created = None  # already reported by the chain check
+                if created is not None and checkpoint["wall_time"] < created:
+                    problems.append("signed checkpoint is older than the head receipt")
+        anchor_problems, anchored = self._anchor_problems(checkpoint)
+        problems += anchor_problems
+        return {"signed": True, "key_id": self.verifier.key_id,
+                "checkpoint_epoch": checkpoint["epoch"] if checkpoint else None,
+                "anchored_epoch": anchored["epoch"] if anchored else None,
+                "anchor_configured": self.head_anchor is not None}

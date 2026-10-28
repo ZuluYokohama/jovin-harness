@@ -31,7 +31,8 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest>=8", "ruff>=0.6"]
+dev = ["pytest>=8", "ruff>=0.6", "cryptography>=42"]
+signing = ["cryptography>=42"]
 
 [project.scripts]
 jovin-harness = "jovin_harness.cli:main"

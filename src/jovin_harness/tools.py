@@ -34,6 +34,20 @@ class ToolError(Exception):
     """A request the harness refused. Nothing was executed."""
 
 
+def store_for(settings) -> ReceiptStore:
+    """Receipt store with signing when ``signing_key`` / ``verify_key`` are configured (fail closed on a bad key)."""
+    from .signing import Signer, SigningError, Verifier
+
+    try:
+        signer = Signer.from_file(settings.signing_key) if settings.signing_key else None
+        verifier = Verifier.from_file(settings.verify_key) if settings.verify_key else None
+    except SigningError as error:
+        raise ReceiptError(str(error)) from None
+    if signer is not None and verifier is not None and signer.key_id != verifier.key_id:
+        raise ReceiptError("signing_key and verify_key are not a key pair")
+    return ReceiptStore(settings.receipts_dir, signer=signer, verifier=verifier, head_anchor=settings.head_anchor)
+
+
 @dataclass
 class Harness:
     settings: Settings
@@ -66,7 +80,7 @@ class Harness:
     @classmethod
     def from_environment(cls, env: dict[str, str] | None = None) -> Harness:
         settings = load_settings(env)
-        return cls(settings=settings, sandbox=Sandbox(settings), store=ReceiptStore(settings.receipts_dir))
+        return cls(settings=settings, sandbox=Sandbox(settings), store=store_for(settings))
 
     def _execute(self, tool: str, mode: str, code: str, tests: str | None, stdin: str | None,
                  timeout_s: int | None, isolation: str = "process") -> dict:

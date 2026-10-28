@@ -22,7 +22,8 @@ reported.
 - **Receipts are tamper-evident.** Each receipt hashes its inputs and results and links to the
   previous one. `verify_receipt` checks one receipt and its recorded index link;
   `jovin-harness receipts verify` checks the whole store, including missing receipt files and
-  reordering. Failures are receipted too. These records are unsigned; see SECURITY.md.
+  reordering. Failures are receipted too. Receipts are unsigned unless a signing key is configured
+  (below); see SECURITY.md.
 
 > Status: early development (0.2.0.dev0). Read [SECURITY.md](SECURITY.md) for what the sandbox does
 > and doesn't protect against.
@@ -83,6 +84,12 @@ jovin-harness receipts head            # export this somewhere you trust
 | `JOVIN_HARNESS_DATA_DIR` | Where receipts, the pinned config and HTTP secrets live (defaults to the platform data dir) |
 | `JOVIN_HARNESS_TIMEOUT_S` | Default per-run limit, at most 30 |
 | `JOVIN_HARNESS_MAX_CONCURRENCY` | Concurrent sandboxes (default 2) |
+| `JOVIN_HARNESS_SIGNING_KEY` | Optional Ed25519 private key (PEM, absolute path outside the data dir). Each receipt gets a `<id>.sig` and every append rewrites a signed `head.checkpoint` (count, head hash, epoch, wall time). Needs `pip install 'jovin-harness[signing]'` |
+| `JOVIN_HARNESS_VERIFY_KEY` | Optional Ed25519 public key (PEM) for verify-only use; with it, unsigned or badly signed receipts and a checkpoint that does not match the index fail `receipts verify` |
+| `JOVIN_HARNESS_HEAD_ANCHOR` | Optional append-only file (outside the data dir) that receives a copy of every signed checkpoint. Only this detects a rollback to an older signed checkpoint plus a matching truncation; keep it where the writer of the data dir cannot rewrite it |
+
+The same three settings can be given in `config.toml` as `signing_key`, `verify_key` and `head_anchor`.
+`jovin-harness receipts checkpoint` prints the signed checkpoint.
 
 Limits can also be set in `<data_dir>/config.toml` under `[limits]`. They can be lowered, never
 raised past the built-in ceilings.
