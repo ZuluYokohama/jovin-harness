@@ -42,19 +42,35 @@ def build_pair(o2: CumulantScaleDerivative, o4: CumulantScaleDerivative, coarse_
 
 
 def train(model: ClosureModel, coarse: torch.Tensor, raw: torch.Tensor, steps: int, lr: float,
-          weight_decay: float = 1e-4) -> list[float]:
-    """Full-batch one-step training on ``(c_t, raw_t) -> c_{t+1}``. Deterministic on CPU."""
-    model.feat_mean.copy_(raw[:-1].mean(0))
-    model.feat_std.copy_(raw[:-1].std(0).clamp_min(1e-9))
+          weight_decay: float = 1e-4, val_frac: float = 0.25, check_every: int = 10) -> dict:
+    """Full-batch one-step training on ``(c_t, raw_t) -> c_{t+1}`` with early stopping.
+
+    The last ``val_frac`` of the training segment is a validation tail (still before the held-out
+    segment). The state with the lowest validation one-step loss is kept, which applies the same
+    shrinkage to useless features for both operators. Deterministic on CPU.
+    """
+    n = coarse.shape[0] - 1
+    fit = int(n * (1 - val_frac))
+    model.feat_mean.copy_(raw[:fit].mean(0))
+    model.feat_std.copy_(raw[:fit].std(0).clamp_min(1e-9))
     opt = torch.optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
-    losses = []
-    for _ in range(steps):
+
+    def loss_on(a: int, b: int) -> torch.Tensor:
+        return ((model(coarse[a:b], raw[a:b]) - coarse[a + 1:b + 1]) ** 2).sum(-1).mean()
+
+    best = (float("inf"), 0, {k: v.clone() for k, v in model.state_dict().items()})
+    for i in range(1, steps + 1):
         opt.zero_grad()
-        loss = ((model(coarse[:-1], raw[:-1]) - coarse[1:]) ** 2).sum(-1).mean()
+        loss = loss_on(0, fit)
         loss.backward()
         opt.step()
-        losses.append(float(loss))
-    return losses
+        if i % check_every == 0 or i == steps:
+            with torch.no_grad():
+                val = float(loss_on(fit, n))
+            if val < best[0]:
+                best = (val, i, {k: v.clone() for k, v in model.state_dict().items()})
+    model.load_state_dict(best[2])
+    return {"best_val_loss": best[0], "best_step": best[1]}
 
 
 @torch.no_grad()
