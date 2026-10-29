@@ -32,6 +32,8 @@ dependencies = [
 
 [project.optional-dependencies]
 dev = ["pytest>=8", "ruff>=0.6"]
+# Fourth-order cumulant gate suite (jovin_harness.cumulant); CPU torch is enough.
+cumulant = ["torch>=2.2", "numpy>=1.26"]
 
 [project.scripts]
 jovin-harness = "jovin_harness.cli:main"

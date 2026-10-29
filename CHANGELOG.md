@@ -2,6 +2,11 @@
 
 ## 0.2.0 (unreleased)
 
+- **Cumulant O4 gate suite (draft).** `jovin_harness.cumulant` (optional `cumulant` extra, CPU torch):
+  matched O2/O4 scale-derivative operators, closure-defect ablation, phase/IAAFT/column-shuffle nulls
+  with a pre-calibrated equivalence band, Pearson/blowup realizability gate, canaries first,
+  hash-chained journal. Synthetic only; see `docs/cumulant/`.
+
 - **Process isolation is the default for `verify_python`.** The code under test (uid 65534) and the
   tests (uid 65533) run in separate processes. Tests call the code's functions through proxies that
   exchange plain data only. Receipts record `integrity: "process_isolated"`.
