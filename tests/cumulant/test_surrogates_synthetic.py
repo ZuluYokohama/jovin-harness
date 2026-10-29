@@ -15,7 +15,8 @@ from jovin_harness.cumulant.synthetic import (  # noqa: E402
 
 def sparse(shape, seed=0, p=0.03):
     g = torch.Generator().manual_seed(seed)
-    return torch.randn(shape, generator=g, dtype=torch.float64) * (torch.rand(shape, generator=g, dtype=torch.float64) < p)
+    keep = torch.rand(shape, generator=g, dtype=torch.float64) < p
+    return torch.randn(shape, generator=g, dtype=torch.float64) * keep
 
 
 @pytest.mark.parametrize("shape", [(512,), (511,), (32, 32), (31, 20)])
@@ -75,7 +76,7 @@ def test_filter_kurtosis_factor_matches_empirical():
     p = 0.02
     w = sparse((4000, n), seed=4, p=p)
     y = torch.fft.irfft(torch.fft.rfft(w) * mask, n=n)
-    emp = band_moments(y, 1)["excess"].mean().item()
+    emp = band_moments(y, 1)["excess"].nanmean().item()  # rare all-zero rows give 0/0
     pred = (3 / p - 3) * filter_kurtosis_factor(mask, n)
     assert abs(emp - pred) / pred < 0.15
 

@@ -25,7 +25,7 @@ from .bands import band_decompose, band_masks, band_moments
 from .closure import block_bootstrap_ci, build_pair, rollout_defect, train
 from .operators import matched_pair
 from .surrogates import column_shuffle, iaaft, phase_randomize
-from .synthetic import StreamSpec, generate, restrict
+from .synthetic import StreamSpec, generate
 
 
 @dataclass(frozen=True)
@@ -187,7 +187,8 @@ def realizability(pr: Prereg, fld: torch.Tensor) -> dict:
 def gate3(pr: Prereg, stream: dict, gate1_result: dict | None) -> dict:
     r = realizability(pr, stream["field"])
     bounded = gate1_result["result"]["long_rollout_bounded"] if gate1_result else {"O2": True, "O4": True}
-    checks = {"finite": r["finite"], "pearson": r["pearson_ok"], "positive_spectral_density": r["positive_spectral_density"],
+    checks = {"finite": r["finite"], "pearson": r["pearson_ok"],
+              "positive_spectral_density": r["positive_spectral_density"],
               "kurt_cap": r["kurt_cap_ok"], "no_kurtosis_blowup": r["kurt_growth_ok"],
               "rollout_bounded": all(bounded.values())}
     return {"details": r, "rollout_bounded": bounded, "checks": checks, "pass": all(checks.values())}

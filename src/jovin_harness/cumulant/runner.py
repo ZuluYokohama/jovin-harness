@@ -26,7 +26,8 @@ def _summ(g: dict | None) -> dict | None:
 
 
 def summarize_gates(g: dict) -> dict:
-    out = {"gate1": _summ(g.get("gate1")), "gate3": g["gate3"]["checks"] | {"pass": g["gate3"]["pass"]}}
+    out = {"gate1": _summ(g.get("gate1")),
+           "gate3": g["gate3"]["checks"] | {"pass": g["gate3"]["pass"]}}
     if g.get("gate2"):
         out["gate2"] = {k: {"rel_diff_ci": v["rel_diff_ci"], "equivalent": g["gate2"]["null_equivalent"][k]}
                         for k, v in g["gate2"]["nulls"].items()} | {"band": g["gate2"]["band"]}
@@ -34,7 +35,8 @@ def summarize_gates(g: dict) -> dict:
 
 
 def run(out: Path, prereg: Prereg | None = None, synthetic_target: str | None = None, threads: int = 2,
-        frozen_by: str = "agent (synthetic canary run)", approval_ref: str = "synthetic-only; no owner go needed") -> dict:
+        frozen_by: str = "agent (synthetic canary run)",
+        approval_ref: str = "synthetic-only; no owner go needed") -> dict:
     torch.set_num_threads(threads)
     pr = prereg or Prereg()
     if pr.data_source != "synthetic":
@@ -54,9 +56,12 @@ def run(out: Path, prereg: Prereg | None = None, synthetic_target: str | None = 
         if not k.startswith("C"):
             continue
         s = {"expect": v["expect"], "pass": v["pass"]}
-        s |= summarize_gates(v["gates"]) if "gates" in v else {"gate3": v["gate3"]["checks"] | {"pass": v["gate3"]["pass"],
-                                                                                              "max_kurt": v["gate3"]["details"]["max_kurt"],
-                                                                                              "kurt_growth": v["gate3"]["details"]["kurt_growth"]}}
+        if "gates" in v:
+            s |= summarize_gates(v["gates"])
+        else:
+            g3 = v["gate3"]
+            s |= {"gate3": g3["checks"] | {"pass": g3["pass"], "max_kurt": g3["details"]["max_kurt"],
+                                           "kurt_growth": g3["details"]["kurt_growth"]}}
         canary_summary[k] = s
         j.append(f"CANARY_{k}", s)
     result = {"prereg_sha256": doc["prereg_sha256"], "band": cal["band"], "canaries": canary_summary,
